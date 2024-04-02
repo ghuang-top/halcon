@@ -1,0 +1,1243 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<hdevelop file_version="1.2" halcon_version="22.11.2.0">
+<procedure name="main">
+<interface/>
+<body>
+<c>* </c>
+<c>* 此示例是一系列示例的一部分，总结了</c>
+<c>* DL分类的工作流程。它使用MVTec药丸数据集。</c>
+<c>* </c>
+<c>* 四个部分是：</c>
+<c>* 1. 数据集预处理。</c>
+<c>* 2. 模型训练。</c>
+<c>* 3. 对训练模型进行评估。</c>
+<c>* 4. 对新图像进行推断。</c>
+<c>* </c>
+<c>* 本示例包含第2部分：'模型训练'。</c>
+<c>* </c>
+<c>* 请注意：此脚本需要第1部分的输出：</c>
+<c>* classify_pill_defects_deep_learning_1_preprocess.hdev</c>
+<c>* </c>
+<l>dev_update_off ()</l>
+<c>* </c>
+<l>ShowExampleScreens := true</l>
+<c>* </c>
+<c>* 训练可以在GPU或CPU上执行。</c>
+<c>* 请参阅安装指南中的相应系统要求。</c>
+<c>* 如果可能，在此示例中使用GPU。</c>
+<c>* 如果您明确希望在CPU上运行此示例，</c>
+<c>* 请选择CPU设备。</c>
+<l>query_available_dl_devices (['runtime', 'runtime'], ['gpu', 'cpu'], DLDeviceHandles)</l>
+<l>if (|DLDeviceHandles| == 0)</l>
+<l>    throw ('未找到支持的设备以继续此示例。')</l>
+<l>endif</l>
+<c>* 由于query_available_dl_devices中使用的过滤器，如果有GPU，则第一个设备是GPU。</c>
+<l>DLDevice := DLDeviceHandles[0]</l>
+<l>get_dl_device_param (DLDevice, 'type', DLDeviceType)</l>
+<l>if (DLDeviceType == 'cpu')</l>
+<c>    * 如果批次大小较小，则使用的线程数可能会影响</c>
+<c>    * 训练持续时间。</c>
+<l>    NumThreadsTraining := 4</l>
+<l>    set_system ('thread_num', NumThreadsTraining)</l>
+<l>endif</l>
+<c>* </c>
+<c>* 显示关于此示例的说明屏幕。</c>
+<l>if (ShowExampleScreens)</l>
+<c>    * </c>
+<c>    * 初始示例窗口和参数。</c>
+<l>    dev_example_init (ShowExampleScreens, ExampleInternals)</l>
+<c>    * </c>
+<c>    * 示例系列介绍文本。</c>
+<l>    dev_display_screen_introduction_train (ExampleInternals)</l>
+<l>    stop ()</l>
+<c>    * </c>
+<c>    * 检查要求。</c>
+<l>    dev_display_screen_error (ExampleInternals, Error)</l>
+<l>    if (Error)</l>
+<l>        stop ()</l>
+<l>    endif</l>
+<c>    * </c>
+<c>    * 解释训练目标。</c>
+<l>    dev_display_screen_training_goals_1 (ExampleInternals)</l>
+<l>    stop ()</l>
+<l>    dev_display_screen_training_goals_2 (ExampleInternals)</l>
+<l>    stop ()</l>
+<c>    * </c>
+<c>    * 解释set_dl_model_param和create_dl_train_param。</c>
+<l>    dev_display_screen_parameters (ExampleInternals)</l>
+<l>    stop ()</l>
+<c>    * </c>
+<c>    * 解释批处理大小。</c>
+<l>    dev_display_screen_batch_size (ExampleInternals)</l>
+<l>    stop ()</l>
+<c>    * </c>
+<c>    * 解释学习率。</c>
+<l>    dev_display_screen_learning_rate (ExampleInternals)</l>
+<l>    stop ()</l>
+<c>    * </c>
+<c>    * 解释周期数。</c>
+<l>    dev_display_screen_num_epochs (ExampleInternals)</l>
+<l>    stop ()</l>
+<c>    * </c>
+<c>    * 解释其他参数。</c>
+<l>    dev_display_screen_other_params (ExampleInternals)</l>
+<l>    stop ()</l>
+<c>    * </c>
+<c>    * 解释train_dl_model。</c>
+<l>    dev_display_screen_training_process (ExampleInternals)</l>
+<l>    stop ()</l>
+<c>    * </c>
+<c>    * 提及深度学习运算符将在哪个设备上运行。</c>
+<l>    dev_display_screen_device (ExampleInternals, DLDevice)</l>
+<l>    stop ()</l>
+<c>    * </c>
+<c>    * 解释训练将立即开始。</c>
+<l>    dev_display_screen_training_starts (ExampleInternals)</l>
+<l>    stop ()</l>
+<c>    * </c>
+<c>    * 关闭任何示例屏幕窗口。</c>
+<l>    dev_close_example_windows (ExampleInternals)</l>
+<l>endif</l>
+<c>* </c>
+<c>* *************************************</c>
+<c>* **   设置输入和输出路径   ***</c>
+<c>* *************************************</c>
+<c>* </c>
+<c>* 所有示例数据都写入此文件夹。</c>
+<l>ExampleDataDir := 'classify_pill_defects_data'</l>
+<c>* 初始化模型的文件路径。</c>
+<l>ModelFileName := 'pretrained_dl_classifier_compact.hdl'</l>
+<c>* 预处理DLDataset的文件路径。</c>
+<c>* 注意：在使用其他图像大小进行预处理后，请调整DataDirectory。</c>
+<l>DataDirectory := ExampleDataDir + '/dldataset_pill_300x300'</l>
+<l>DLDatasetFileName := DataDirectory + '/dl_dataset.hdict'</l>
+<l>DLPreprocessParamFileName := DataDirectory + '/dl_preprocess_param.hdict'</l>
+<c>* 最佳评估模型的输出路径。</c>
+<l>BestModelBaseName := ExampleDataDir + '/best_dl_model_classification'</l>
+<c>* 最终训练模型的输出路径。</c>
+<l>FinalModelBaseName := ExampleDataDir + '/final_dl_model_classification'</l>
+<c>* </c>
+<c>* *******************************</c>
+<c>* **   设置基本参数   ***</c>
+<c>* *******************************</c>
+<c>* 下面的参数需要频繁调整。</c>
+<c>* </c>
+<c>* 模型参数。</c>
+<c>* 批处理大小。如果此示例在GPU上运行，</c>
+<c>* 您可以将BatchSize设置为'maximum'，它将</c>
+<c>* 自动使用set_dl_model_param_max_gpu_batch_size确定。</c>
+<l>if (DLDeviceType == 'gpu')</l>
+<l>    BatchSize := 'maximum'</l>
+<l>else</l>
+<l>    BatchSize := 64</l>
+<l>endif</l>
+<c>* 初始学习率。</c>
+<l>InitialLearningRate := 0.001</l>
+<c>* 如果批处理大小较小，则动量应较大。</c>
+<l>Momentum := 0.9</l>
+<c>* </c>
+<c>* train_dl_model使用的参数。</c>
+<c>* 训练模型的时代数。</c>
+<l>NumEpochs := 16</l>
+<c>* 每个时代的评估间隔（以时代为单位）以计算验证拆分上的评估指标。</c>
+<l>EvaluationIntervalEpochs := 1</l>
+<c>* 更改学习率的时期，例如[4, 8, 12]。</c>
+<c>* 如果不想更改学习率，请将其设置为[]。</c>
+<l>ChangeLearningRateEpochs := [4, 8, 12]</l>
+<c>* 将学习率更改为以下值，例如InitialLearningRate * [0.1, 0.01, 0.001]。</c>
+<c>* 元组的长度必须与ChangeLearningRateEpochs相同。</c>
+<l>ChangeLearningRateValues := InitialLearningRate * [0.1, 0.01, 0.001]</l>
+<c>* </c>
+<c>* **********************************</c>
+<c>* **   设置高级参数   ***</c>
+<c>* **********************************</c>
+<c>* 下面的参数可能在极少数情况下需要更改。</c>
+<c>* </c>
+<c>* 模型参数。</c>
+<c>* 设置权重先验。</c>
+<l>WeightPrior := 0.0005</l>
+<c>* </c>
+<c>* train_dl_model使用的参数。</c>
+<c>* 控制是否显示训练进度（true/false）。</c>
+<l>EnableDisplay := true</l>
+<c>* 为训练设置一个随机种子。</c>
+<l>RandomSeed := 42</l>
+<l>set_system ('seed_rand', RandomSeed)</l>
+<c>* </c>
+<c>* 为了在相同的GPU上获得几乎确定性的训练结果</c>
+<c>* （系统、驱动程序、cuda版本），您可以指定“cudnn_deterministic”为</c>
+<c>* “true”。请注意，这可能会稍微减慢训练速度。</c>
+<l>* set_system ('cudnn_deterministic', 'true')</l>
+<c>* </c>
+<c>* 设置create_dl_train_param的通用参数。</c>
+<c>* 有关所有可用参数的概述，请参阅create_dl_train_param的文档。</c>
+<l>GenParamName := []</l>
+<l>GenParamValue := []</l>
+<c>* </c>
+<c>* 增强参数。</c>
+<c>* 如果要在训练过程中增强样本，请创建增强dl_samples所需的字典。</c>
+<c>* 在这里，我们设置增强百分比和方法。</c>
+<l>AugmentationParam := dict{}</l>
+<c>* 要增强的样本百分比。</c>
+<l>AugmentationParam.augmentation_percentage := 50</l>
+<c>* 沿行和列镜像图像。</c>
+<l>AugmentationParam.mirror := 'rc'</l>
+<l>GenParamName := [GenParamName,'augment']</l>
+<l>GenParamValue := [GenParamValue,AugmentationParam]</l>
+<c>* </c>
+<c>* 更改策略。</c>
+<c>* 可以在训练期间更改模型参数。</c>
+<c>* 在这里，我们根据上面指定的学习率更改学习率。</c>
+<l>if (|ChangeLearningRateEpochs| &gt; 0)</l>
+<l>    ChangeStrategy := dict{}</l>
+<c>    * 指定要更改的模型参数，这里是学习率。</c>
+<l>    ChangeStrategy.model_param := 'learning_rate'</l>
+<c>    * 将参数值从'initial_value'开始。</c>
+<l>    ChangeStrategy.initial_value := InitialLearningRate</l>
+<c>    * 在以下时期减少参数值。</c>
+<l>    ChangeStrategy.epochs := ChangeLearningRateEpochs</l>
+<c>    * 将参数值更改为以下值。</c>
+<l>    ChangeStrategy.values := ChangeLearningRateValues</l>
+<c>    * 将所有更改策略收集为输入。</c>
+<l>    GenParamName := [GenParamName,'change']</l>
+<l>    GenParamValue := [GenParamValue,ChangeStrategy]</l>
+<l>endif</l>
+<c>* </c>
+<c>* 序列化策略。</c>
+<c>* 有几种选项可以将中间模型保存到磁盘（参见create_dl_train_param）。</c>
+<c>* 在这里，我们将最佳模型和最终模型保存到上面设置的路径。</c>
+<l>SerializationStrategy := dict{['type']: 'best', basename: BestModelBaseName}</l>
+<l>GenParamName := [GenParamName,'serialize']</l>
+<l>GenParamValue := [GenParamValue,SerializationStrategy]</l>
+<l>SerializationStrategy := dict{['type']: 'final', basename: FinalModelBaseName}</l>
+<l>GenParamName := [GenParamName,'serialize']</l>
+<l>GenParamValue := [GenParamValue,SerializationStrategy]</l>
+<c>* </c>
+<c>* 显示参数。</c>
+<c>* 在本示例中，选择20%的训练拆分来显示</c>
+<c>* 训练期间减少训练拆分的评估指标。较低的百分比</c>
+<c>* 有助于加快评估/训练速度。如果不想显示训练拆分的评估指标，</c>
+<c>* 将此值设置为0（默认值）。</c>
+<l>SelectedPercentageTrainSamples := 20</l>
+<c>* 设置训练图的x轴参数。</c>
+<l>XAxisLabel := 'epochs'</l>
+<l>DisplayParam := dict{}</l>
+<l>DisplayParam.selected_percentage_train_samples := SelectedPercentageTrainSamples</l>
+<l>DisplayParam.x_axis_label := XAxisLabel</l>
+<l>GenParamName := [GenParamName,'display']</l>
+<l>GenParamValue := [GenParamValue,DisplayParam]</l>
+<c>* </c>
+<c>* *****************************************</c>
+<c>* **   读取初始模型和数据集   ***</c>
+<c>* *****************************************</c>
+<c>* </c>
+<c>* 检查所有必需的文件是否存在。</c>
+<l>check_data_availability (ExampleDataDir, DLDatasetFileName, DLPreprocessParamFileName)</l>
+<c>* </c>
+<c>* 读取在预处理过程中初始化的模型。</c>
+<l>read_dl_model (ModelFileName, DLModelHandle)</l>
+<c>* </c>
+<c>* 读取预处理的DLDataset文件。</c>
+<l>read_dict (DLDatasetFileName, [], [], DLDataset)</l>
+<c>* </c>
+<c>* *******************************</c>
+<c>* **   设置模型参数   ***</c>
+<c>* *******************************</c>
+<c>* </c>
+<c>* 根据上面的设置设置模型超参数。</c>
+<l>set_dl_model_param (DLModelHandle, 'learning_rate', InitialLearningRate)</l>
+<l>set_dl_model_param (DLModelHandle, 'momentum', Momentum)</l>
+<c>* 为模型设置类名。</c>
+<l>ClassNames := DLDataset.class_names</l>
+<l>set_dl_model_param (DLModelHandle, 'class_names', ClassNames)</l>
+<c>* 从预处理参数中获取图像尺寸并为模型设置它们。</c>
+<l>read_dict (DLPreprocessParamFileName, [], [], DLPreprocessParam)</l>
+<l>set_dl_model_param (DLModelHandle, 'image_dimensions', [DLPreprocessParam.image_width,DLPreprocessParam.image_height,DLPreprocessParam.image_num_channels])</l>
+<l>if (BatchSize == 'maximum' and DLDeviceType == 'gpu')</l>
+<l>    set_dl_model_param_max_gpu_batch_size (DLModelHandle, 100)</l>
+<l>else</l>
+<l>    if (BatchSize == 'maximum')</l>
+<c>        * 在继续之前，请设置适当的批处理大小。</c>
+<l>        stop ()</l>
+<l>    endif</l>
+<l>    set_dl_model_param (DLModelHandle, 'batch_size', BatchSize)</l>
+<l>endif</l>
+<c>* 确定批处理大小后，设置设备。</c>
+<l>set_dl_model_param (DLModelHandle, 'device', DLDevice)</l>
+<l>if (|WeightPrior| &gt; 0)</l>
+<l>    set_dl_model_param (DLModelHandle, 'weight_prior', WeightPrior)</l>
+<l>endif</l>
+<c>* 将类权重设置为抵消不平衡的训练数据。在这个例子中</c>
+<c>* 我们选择默认值，因为数据集中的类是均匀分布的。</c>
+<l>tuple_gen_const (|ClassNames|, 1.0, ClassWeights)</l>
+<l>set_dl_model_param (DLModelHandle, 'class_weights', ClassWeights)</l>
+<c>* </c>
+<c>* **************************</c>
+<c>* **   训练模型   ***</c>
+<c>* **************************</c>
+<c>* </c>
+<c>* 创建训练参数。</c>
+<l>create_dl_train_param (DLModelHandle, NumEpochs, EvaluationIntervalEpochs, EnableDisplay, RandomSeed, GenParamName, GenParamValue, TrainParam)</l>
+<c>* </c>
+<c>* 通过调用训练操作train_dl_model_batch ()开始训练。</c>
+<l>train_dl_model (DLDataset, DLModelHandle, TrainParam, 0, TrainResults, TrainInfos, EvaluationInfos)</l>
+<c>* </c>
+<c>* 在训练结束后停止，然后关闭窗口。</c>
+<l>dev_disp_text ('按运行（F5）继续', 'window', 'bottom', 'right', 'black', [], [])</l>
+<l>stop ()</l>
+<c>* </c>
+<c>* 关闭训练窗口。</c>
+<l>dev_close_window ()</l>
+<c>* </c>
+<c>* 显示最终示例屏幕。</c>
+<l>if (ShowExampleScreens)</l>
+<c>    * 提示进行DL分类评估和推断示例。</c>
+<l>    dev_display_screen_final (ExampleInternals)</l>
+<l>    stop ()</l>
+<c>    * 关闭示例窗口。</c>
+<l>    dev_close_example_windows (ExampleInternals)</l>
+<l>endif</l>
+<c></c>
+</body>
+<docu id="main">
+<parameters/>
+</docu>
+</procedure>
+<procedure name="dev_open_text_window">
+<interface>
+<ic>
+<par name="ExampleInternals" base_type="ctrl" dimension="0"/>
+</ic>
+</interface>
+<body>
+<c>* Procedure for re-open the text window.</c>
+<l>WindowWidthText := 800</l>
+<l>WindowHeightText := 300</l>
+<l>WindowWidthImage := 800</l>
+<l>WindowHeightImages := 400</l>
+<l>WindowBGColor := 'gray'</l>
+<l>dev_open_window (0, 0, WindowWidthText, WindowHeightText, WindowBGColor, WindowHandleText)</l>
+<l>set_display_font (WindowHandleText, 16, 'mono', 'true', 'false')</l>
+<l>set_dict_tuple (ExampleInternals, 'window_text', WindowHandleText)</l>
+<l>set_dict_tuple (ExampleInternals, 'window_text_width', WindowWidthText)</l>
+<l>set_dict_tuple (ExampleInternals, 'window_text_height', WindowHeightText)</l>
+<l>return ()</l>
+</body>
+<docu id="dev_open_text_window">
+<parameters>
+<parameter id="ExampleInternals"/>
+</parameters>
+</docu>
+</procedure>
+<procedure name="dev_example_init">
+<interface>
+<ic>
+<par name="ShowExampleScreens" base_type="ctrl" dimension="0"/>
+</ic>
+<oc>
+<par name="ExampleInternals" base_type="ctrl" dimension="0"/>
+</oc>
+</interface>
+<body>
+<c>* This procedure initializes the graphic windows that are used for explanations during the example.</c>
+<c></c>
+<c>* A dict that will be used/adapted by other example procedures.</c>
+<l>create_dict (ExampleInternals)</l>
+<l>set_dict_tuple (ExampleInternals, 'show_example_screens', ShowExampleScreens)</l>
+<l>if (not ShowExampleScreens)</l>
+<l>    return ()</l>
+<l>endif</l>
+<c></c>
+<c>* Top window.</c>
+<l>dev_close_window ()</l>
+<l>WindowWidthText := 800</l>
+<l>WindowHeightText := 330</l>
+<l>WindowWidthImage := 800</l>
+<l>WindowHeightImages := 400</l>
+<l>WindowBGColor := 'gray'</l>
+<l>dev_open_window (0, 0, WindowWidthText, WindowHeightText, WindowBGColor, WindowHandleText)</l>
+<l>set_display_font (WindowHandleText, 16, 'mono', 'true', 'false')</l>
+<l>set_dict_tuple (ExampleInternals, 'window_text', WindowHandleText)</l>
+<l>set_dict_tuple (ExampleInternals, 'window_text_width', WindowWidthText)</l>
+<l>set_dict_tuple (ExampleInternals, 'window_text_height', WindowHeightText)</l>
+<c></c>
+<c>* Bottom window.</c>
+<l>WindowYImages := WindowHeightText + 60</l>
+<l>WindowXImages := 0</l>
+<l>dev_open_window (WindowYImages, WindowXImages, WindowWidthImage, WindowHeightImages, WindowBGColor, WindowHandleImages)</l>
+<l>set_display_font (WindowHandleImages, 16, 'mono', 'true', 'false')</l>
+<l>set_dict_tuple (ExampleInternals, 'window_images', WindowHandleImages)</l>
+<l>set_dict_tuple (ExampleInternals, 'window_images_width', WindowWidthImage)</l>
+<l>set_dict_tuple (ExampleInternals, 'window_images_height', WindowHeightImages)</l>
+<l>set_dict_tuple (ExampleInternals, 'window_images_x', WindowXImages)</l>
+<l>set_dict_tuple (ExampleInternals, 'window_images_y', WindowYImages)</l>
+<c></c>
+<l>set_dict_tuple (ExampleInternals, 'window_images_needed', false)</l>
+<l>set_dict_tuple (ExampleInternals, 'window_legend_needed', false)</l>
+<c></c>
+<l>return ()</l>
+</body>
+<docu id="dev_example_init">
+<parameters>
+<parameter id="ExampleInternals"/>
+<parameter id="ShowExampleScreens">
+<default_type>integer</default_type>
+<default_value>0</default_value>
+<description lang="en_US">A boolean that is used to enable/disable explanation screens in this example</description>
+<multivalue>false</multivalue>
+<sem_type>string</sem_type>
+<type_list>
+<item>integer</item>
+</type_list>
+<value_max>1</value_max>
+<value_min>0</value_min>
+</parameter>
+</parameters>
+</docu>
+</procedure>
+<procedure name="dev_close_example_image_window">
+<interface>
+<ic>
+<par name="ExampleInternals" base_type="ctrl" dimension="0"/>
+</ic>
+</interface>
+<body>
+<c>* This procedure closes the image window.</c>
+<c></c>
+<l>try</l>
+<l>    get_dict_tuple (ExampleInternals, 'window_images', WindowHandleImages)</l>
+<l>    dev_set_window (WindowHandleImages)</l>
+<l>    dev_close_window ()</l>
+<c>    * Delete key.</c>
+<l>    remove_dict_key (ExampleInternals, 'window_images')</l>
+<l>catch (Exception)</l>
+<l>endtry</l>
+<c></c>
+<l>return ()</l>
+</body>
+<docu id="dev_close_example_image_window">
+<parameters>
+<parameter id="ExampleInternals"/>
+</parameters>
+</docu>
+</procedure>
+<procedure name="dev_display_screen_training_goals_1">
+<interface>
+<ic>
+<par name="ExampleInternals" base_type="ctrl" dimension="0"/>
+</ic>
+</interface>
+<body>
+<c>* This procedure explains the fundamental training goals.</c>
+<c></c>
+<l>get_dict_tuple (ExampleInternals, 'show_example_screens', ShowExampleScreens)</l>
+<l>if (not ShowExampleScreens)</l>
+<l>    return ()</l>
+<l>endif</l>
+<c></c>
+<c>* Reset the open windows for a clean display.</c>
+<l>set_dict_tuple (ExampleInternals, 'window_images_needed', true)</l>
+<l>dev_display_example_reset_windows (ExampleInternals)</l>
+<c></c>
+<c>* Display the explanatory text.</c>
+<l>get_dict_tuple (ExampleInternals, 'window_text', WindowHandleText)</l>
+<l>dev_set_window (WindowHandleText)</l>
+<c></c>
+<l>Text := 'While training there are two main goals to be achieved:'</l>
+<l>Text[|Text|] := ''</l>
+<l>Text[|Text|] := '--&gt; 1.) The \'loss\' is commonly used to optimize the model on the '</l>
+<l>Text[|Text|] := '        training data. Hence, the objective is to reduce the loss on the '</l>
+<l>Text[|Text|] := '        training data as much as possible.'</l>
+<l>Text[|Text|] := '    2.) For the evaluation measure on the validation data the'</l>
+<l>Text[|Text|] := '        \'top1_error\' is usually used for classification.'</l>
+<l>Text[|Text|] := '        This value should have a decreasing trend during '</l>
+<l>Text[|Text|] := '        the training process.'</l>
+<l>Text[|Text|] := ' '</l>
+<l>Text[|Text|] := 'An example of the loss during a successful training is displayed below.'</l>
+<l>Text[|Text|] := ' '</l>
+<c></c>
+<l>dev_disp_text (Text, 'window', 'top', 'left', 'black', 'box', 'true')</l>
+<l>dev_disp_text ('Press Run (F5) to continue', 'window', 'bottom', 'right', 'black', [], [])</l>
+<c></c>
+<c>* Display the explanatory image.</c>
+<l>get_dict_tuple (ExampleInternals, 'window_images', WindowHandleImages)</l>
+<l>set_part_style (WindowHandleImages, 1)</l>
+<l>dev_set_window (WindowHandleImages)</l>
+<l>read_image (ImageLoss, 'dl_explanation/training_class_goals_loss')</l>
+<l>get_image_size (ImageLoss, Width, Height)</l>
+<l>dev_set_part (0, 0, Height, Width)</l>
+<l>dev_display (ImageLoss)</l>
+<c></c>
+<l>dev_disp_text ('Loss', 'window', 10, 70, 'black', [], [])</l>
+<l>return ()</l>
+</body>
+<docu id="dev_display_screen_training_goals_1">
+<parameters>
+<parameter id="ExampleInternals">
+<default_type>integer</default_type>
+<mixed_type>false</mixed_type>
+<sem_type>dict</sem_type>
+<type_list>
+<item>integer</item>
+</type_list>
+</parameter>
+</parameters>
+</docu>
+</procedure>
+<procedure name="dev_display_screen_num_epochs">
+<interface>
+<ic>
+<par name="ExampleInternals" base_type="ctrl" dimension="0"/>
+</ic>
+</interface>
+<body>
+<c>* This procedure explains the parameter 'num_epochs'.</c>
+<c></c>
+<l>get_dict_tuple (ExampleInternals, 'show_example_screens', ShowExampleScreens)</l>
+<l>if (not ShowExampleScreens)</l>
+<l>    return ()</l>
+<l>endif</l>
+<c></c>
+<c>* Reset the open windows for a clean display.</c>
+<l>set_dict_tuple (ExampleInternals, 'window_images_needed', false)</l>
+<l>dev_display_example_reset_windows (ExampleInternals)</l>
+<c></c>
+<c>* Display the explanatory text.</c>
+<l>get_dict_tuple (ExampleInternals, 'window_text', WindowHandleText)</l>
+<l>dev_set_window (WindowHandleText)</l>
+<c></c>
+<l>Text := 'Training parameter: \'num_epochs\''</l>
+<l>Text[|Text|] := ''</l>
+<l>Text[|Text|] := 'During an epoch the entire training data is used once.'</l>
+<l>Text[|Text|] := ''</l>
+<l>Text[|Text|] := 'The number of epochs depends on the individual problem.'</l>
+<l>Text[|Text|] := 'The more complex the problem the longer the training needs'</l>
+<l>Text[|Text|] := 'to get good results. Hence, it is beneficial to raise the value.'</l>
+<l>Text[|Text|] := ''</l>
+<l>Text[|Text|] := 'The number of epochs is set in the procedure '</l>
+<l>Text[|Text|] := '\'create_dl_train_param\'.'</l>
+<l>Text[|Text|] := ' '</l>
+<c></c>
+<l>dev_disp_text (Text, 'window', 'top', 'left', 'black', 'box', 'true')</l>
+<l>dev_disp_text ('Press Run (F5) to continue', 'window', 'bottom', 'right', 'black', [], [])</l>
+<c></c>
+<l>return ()</l>
+</body>
+<docu id="dev_display_screen_num_epochs">
+<parameters>
+<parameter id="ExampleInternals"/>
+</parameters>
+</docu>
+</procedure>
+<procedure name="dev_display_screen_error">
+<interface>
+<ic>
+<par name="ExampleInternals" base_type="ctrl" dimension="0"/>
+</ic>
+<oc>
+<par name="Error" base_type="ctrl" dimension="0"/>
+</oc>
+</interface>
+<body>
+<c>* Checks that all required files are present.</c>
+<c>* Display an error if this is not the case.</c>
+<c></c>
+<l>get_dict_tuple (ExampleInternals, 'show_example_screens', ShowExampleScreens)</l>
+<l>if (not ShowExampleScreens)</l>
+<l>    return ()</l>
+<l>endif</l>
+<c></c>
+<c>* Reset the open windows for a clean display.</c>
+<l>set_dict_tuple (ExampleInternals, 'window_images_needed', false)</l>
+<l>dev_display_example_reset_windows (ExampleInternals)</l>
+<c></c>
+<c>* Display the overview on the different example parts.</c>
+<l>get_dict_tuple (ExampleInternals, 'window_text', WindowHandleText)</l>
+<l>dev_set_window (WindowHandleText)</l>
+<c></c>
+<c>* Get path of preprocessed dataset.</c>
+<l>DataDirectory := 'classify_pill_defects_data/dldataset_pill_300x300'</l>
+<l>DLDatasetFileName := DataDirectory + '/dl_dataset.hdict'</l>
+<l>DLPreprocessParamFileName := DataDirectory + '/dl_preprocess_param.hdict'</l>
+<c>* Check whether the preprocessed dataset is available.</c>
+<l>file_exists (DLDatasetFileName, DLDDatasetExists)</l>
+<l>file_exists (DLPreprocessParamFileName, DLPreprocessingParamExists)</l>
+<l>DataExists := DLDDatasetExists and DLPreprocessingParamExists</l>
+<c></c>
+<l>Error := false</l>
+<c></c>
+<l>if (not DataExists)</l>
+<l>    Error := true</l>
+<l>    ErrorText := []</l>
+<c>    * Part 1 should be run before continuing this example.</c>
+<l>    ErrorText[|ErrorText|] := 'To run this example you need the output of:'</l>
+<l>    ErrorText[|ErrorText|] := ' - \'classify_pill_defects_deep_learning_1_preprocess.hdev\''</l>
+<l>    ErrorText[|ErrorText|] := 'Please run this example first.'</l>
+<l>set_display_font (WindowHandleText, 20, 'mono', 'true', 'false')</l>
+<l>    dev_disp_text (ErrorText, 'window', 'top', 'left', 'red', 'box', 'true')</l>
+<l>set_display_font (WindowHandleText, 16, 'mono', 'true', 'false')</l>
+<l>endif</l>
+<c></c>
+<l>return ()</l>
+</body>
+<docu id="dev_display_screen_error">
+<parameters>
+<parameter id="Error"/>
+<parameter id="ExampleInternals"/>
+</parameters>
+</docu>
+</procedure>
+<procedure name="dev_display_screen_final">
+<interface>
+<ic>
+<par name="ExampleInternals" base_type="ctrl" dimension="0"/>
+</ic>
+</interface>
+<body>
+<c>* This procedure gives a hint to the next classification examples</c>
+<c>* 'classify_pill_defects_deep_learning_3_evaluate.hdev' and</c>
+<c>* 'classify_pill_defects_deep_learning_4_infer.hdev'.</c>
+<c></c>
+<l>get_dict_tuple (ExampleInternals, 'show_example_screens', ShowExampleScreens)</l>
+<l>if (not ShowExampleScreens)</l>
+<l>    return ()</l>
+<l>endif</l>
+<c></c>
+<c>* Reset the open windows for a clean display.</c>
+<l>set_dict_tuple (ExampleInternals, 'window_images_needed', false)</l>
+<l>dev_display_example_reset_windows (ExampleInternals)</l>
+<c></c>
+<c>* Open the text window again.</c>
+<l>dev_open_text_window (ExampleInternals)</l>
+<l>get_dict_tuple (ExampleInternals, 'window_text', WindowHandleText)</l>
+<l>dev_set_window (WindowHandleText)</l>
+<c></c>
+<l>Text := 'Now, the second part \'Training of the model\' of the workflow'</l>
+<l>Text[|Text|] := 'for DL classification is finished.'</l>
+<l>Text[|Text|] := ''</l>
+<l>Text[|Text|] := 'The trained model can now be evaluated and used for the inference'</l>
+<l>Text[|Text|] := 'of new images.'</l>
+<l>Text[|Text|] := ''</l>
+<l>Text[|Text|] := 'For evaluation please open'</l>
+<l>Text[|Text|] := '\'classify_pill_defects_deep_learning_3_evaluate.hdev\'.'</l>
+<l>Text[|Text|] := ''</l>
+<l>Text[|Text|] := 'For inference please open'</l>
+<l>Text[|Text|] := '\'classify_pill_defects_deep_learning_4_infer.hdev\'.'</l>
+<l>Text[|Text|] := ' '</l>
+<c></c>
+<l>dev_disp_text (Text, 'window', 'top', 'left', 'black', 'box', 'true')</l>
+<l>dev_disp_text ('Please open the next example.', 'window', 'bottom', 'right', 'black', [], [])</l>
+<l>return ()</l>
+</body>
+<docu id="dev_display_screen_final">
+<parameters>
+<parameter id="ExampleInternals"/>
+</parameters>
+</docu>
+</procedure>
+<procedure name="dev_display_screen_training_starts">
+<interface>
+<ic>
+<par name="ExampleInternals" base_type="ctrl" dimension="0"/>
+</ic>
+</interface>
+<body>
+<c>* This procedure gives a hint that the training starts.</c>
+<c></c>
+<l>get_dict_tuple (ExampleInternals, 'show_example_screens', ShowExampleScreens)</l>
+<l>if (not ShowExampleScreens)</l>
+<l>    return ()</l>
+<l>endif</l>
+<c></c>
+<c>* Reset the open windows for a clean display.</c>
+<l>set_dict_tuple (ExampleInternals, 'window_images_needed', false)</l>
+<l>dev_display_example_reset_windows (ExampleInternals)</l>
+<c></c>
+<l>get_dict_tuple (ExampleInternals, 'window_text', WindowHandleText)</l>
+<l>dev_set_window (WindowHandleText)</l>
+<c></c>
+<l>Text := []</l>
+<l>Text[|Text|] := 'Now, the training of the model will start.'</l>
+<l>Text[|Text|] := ''</l>
+<l>Text[|Text|] := 'During training, the progress is indicated visually.'</l>
+<l>Text[|Text|] := ''</l>
+<l>Text[|Text|] := 'Training can be performed on GPU and CPU.'</l>
+<l>Text[|Text|] := 'See the respective system requirements in the Installation Guide.'</l>
+<l>Text[|Text|] := ''</l>
+<l>Text[|Text|] := 'The training will take a while and depends highly on'</l>
+<l>Text[|Text|] := 'the parameter settings and the specific device used.'</l>
+<l>Text[|Text|] := ' '</l>
+<c></c>
+<l>dev_disp_text (Text, 'window', 'top', 'left', 'black', 'box', 'true')</l>
+<l>dev_disp_text ('Press Run (F5) to continue', 'window', 'bottom', 'right', 'black', [], [])</l>
+<l>return ()</l>
+</body>
+<docu id="dev_display_screen_training_starts">
+<parameters>
+<parameter id="ExampleInternals">
+<default_type>integer</default_type>
+<mixed_type>false</mixed_type>
+<sem_type>dict</sem_type>
+<type_list>
+<item>integer</item>
+</type_list>
+</parameter>
+</parameters>
+</docu>
+</procedure>
+<procedure name="dev_display_screen_introduction_train">
+<interface>
+<ic>
+<par name="ExampleInternals" base_type="ctrl" dimension="0"/>
+</ic>
+</interface>
+<body>
+<c>* This procedure displays an overview on the different example parts</c>
+<c>* and shows some image examples.</c>
+<c></c>
+<l>get_dict_tuple (ExampleInternals, 'show_example_screens', ShowExampleScreens)</l>
+<l>if (not ShowExampleScreens)</l>
+<l>    return ()</l>
+<l>endif</l>
+<c></c>
+<c>* Reset the open windows for a clean display.</c>
+<l>set_dict_tuple (ExampleInternals, 'window_images_needed', false)</l>
+<l>dev_display_example_reset_windows (ExampleInternals)</l>
+<c></c>
+<c>* Display the overview on the different example parts.</c>
+<l>get_dict_tuple (ExampleInternals, 'window_text', WindowHandleText)</l>
+<l>dev_set_window (WindowHandleText)</l>
+<c></c>
+<l>Text := 'This example is part of a series of examples, which summarize '</l>
+<l>Text[|Text|] := 'the workflow for DL classification. It uses the MVTec pill dataset.'</l>
+<l>Text[|Text|] := ''</l>
+<l>Text[|Text|] := 'The four parts are: '</l>
+<l>Text[|Text|] := '1. Dataset preprocessing.'</l>
+<l>Text[|Text|] := '2. Training of the model.'</l>
+<l>Text[|Text|] := '3. Evaluation of the trained model.'</l>
+<l>Text[|Text|] := '4. Inference on new images.'</l>
+<l>Text[|Text|] := ''</l>
+<l>Text[|Text|] := 'This example covers part 2: \'Training of the model\'.'</l>
+<l>Text[|Text|] := ' '</l>
+<c></c>
+<l>dev_disp_text (Text, 'window', 'top', 'left', 'black', 'box', 'true')</l>
+<l>dev_disp_text ('Press Run (F5) to continue', 'window', 'bottom', 'right', 'black', [], [])</l>
+<c></c>
+<l>return ()</l>
+</body>
+<docu id="dev_display_screen_introduction_train">
+<parameters>
+<parameter id="ExampleInternals"/>
+</parameters>
+</docu>
+</procedure>
+<procedure name="dev_display_screen_parameters">
+<interface>
+<ic>
+<par name="ExampleInternals" base_type="ctrl" dimension="0"/>
+</ic>
+</interface>
+<body>
+<c>* This procedure explains model and training parameters in general.</c>
+<c></c>
+<l>get_dict_tuple (ExampleInternals, 'show_example_screens', ShowExampleScreens)</l>
+<l>if (not ShowExampleScreens)</l>
+<l>    return ()</l>
+<l>endif</l>
+<c></c>
+<c>* Reset the open windows for a clean display.</c>
+<l>set_dict_tuple (ExampleInternals, 'window_images_needed', false)</l>
+<l>dev_display_example_reset_windows (ExampleInternals)</l>
+<c></c>
+<c>* Display the explanatory text.</c>
+<l>get_dict_tuple (ExampleInternals, 'window_text', WindowHandleText)</l>
+<l>dev_set_window (WindowHandleText)</l>
+<c></c>
+<l>Text := 'There are multiple model and training parameters.'</l>
+<l>Text[|Text|] := ''</l>
+<l>Text[|Text|] := 'To set the model parameters \'set_dl_model_param\' is used.'</l>
+<l>Text[|Text|] := 'The training parameters are set in \'create_dl_train_param\'.'</l>
+<l>Text[|Text|] := ''</l>
+<l>Text[|Text|] := 'The parameters are employed to specify the training process.'</l>
+<l>Text[|Text|] := 'Some of them have a significant impact on the training result.'</l>
+<l>Text[|Text|] := 'The most prominent ones are explained in the following.'</l>
+<l>Text[|Text|] := ' '</l>
+<c></c>
+<l>dev_disp_text (Text, 'window', 'top', 'left', 'black', 'box', 'true')</l>
+<l>dev_disp_text ('Press Run (F5) to continue', 'window', 'bottom', 'right', 'black', [], [])</l>
+<c></c>
+<l>return ()</l>
+</body>
+<docu id="dev_display_screen_parameters">
+<parameters>
+<parameter id="ExampleInternals">
+<default_type>integer</default_type>
+<mixed_type>false</mixed_type>
+<sem_type>dict</sem_type>
+<type_list>
+<item>integer</item>
+</type_list>
+</parameter>
+</parameters>
+</docu>
+</procedure>
+<procedure name="dev_display_screen_batch_size">
+<interface>
+<ic>
+<par name="ExampleInternals" base_type="ctrl" dimension="0"/>
+</ic>
+</interface>
+<body>
+<c>* This procedure explains the parameter 'batch_size'.</c>
+<c></c>
+<l>get_dict_tuple (ExampleInternals, 'show_example_screens', ShowExampleScreens)</l>
+<l>if (not ShowExampleScreens)</l>
+<l>    return ()</l>
+<l>endif</l>
+<c></c>
+<c>* Reset the open windows for a clean display.</c>
+<l>set_dict_tuple (ExampleInternals, 'window_images_needed', false)</l>
+<l>dev_display_example_reset_windows (ExampleInternals)</l>
+<c></c>
+<c>* Display the explanatory text.</c>
+<l>get_dict_tuple (ExampleInternals, 'window_text', WindowHandleText)</l>
+<l>dev_set_window (WindowHandleText)</l>
+<c></c>
+<l>Text := 'Model parameter: \'batch_size\''</l>
+<l>Text[|Text|] := ''</l>
+<l>Text[|Text|] := 'The dataset is divided into smaller subsets of data which are called'</l>
+<l>Text[|Text|] := 'batches. The \'batch_size\' determines the number of images taken'</l>
+<l>Text[|Text|] := 'into a batch and thus processed simultaneously.'</l>
+<l>Text[|Text|] := ''</l>
+<l>Text[|Text|] := 'In most cases it is recommended to use a high batch size, but the model'</l>
+<l>Text[|Text|] := 'will also need sufficient training steps (meaning enough performed'</l>
+<l>Text[|Text|] := 'iteration cycles).'</l>
+<l>Text[|Text|] := ''</l>
+<l>Text[|Text|] := 'In case the model is trained on a GPU, the \'batch_size\' can be'</l>
+<l>Text[|Text|] := 'set to its maximum regarding the available GPU memory using the'</l>
+<l>Text[|Text|] := 'procedure \'set_dl_model_param_max_gpu_batch_size\'.'</l>
+<l>Text[|Text|] := ' '</l>
+<c></c>
+<c></c>
+<l>dev_disp_text (Text, 'window', 'top', 'left', 'black', 'box', 'true')</l>
+<l>dev_disp_text ('Press Run (F5) to continue', 'window', 'bottom', 'right', 'black', [], [])</l>
+<c></c>
+<l>return ()</l>
+</body>
+<docu id="dev_display_screen_batch_size">
+<parameters>
+<parameter id="ExampleInternals"/>
+</parameters>
+</docu>
+</procedure>
+<procedure name="dev_display_screen_learning_rate">
+<interface>
+<ic>
+<par name="ExampleInternals" base_type="ctrl" dimension="0"/>
+</ic>
+</interface>
+<body>
+<c>* This procedure explains the learning rate.</c>
+<c></c>
+<l>get_dict_tuple (ExampleInternals, 'show_example_screens', ShowExampleScreens)</l>
+<l>if (not ShowExampleScreens)</l>
+<l>    return ()</l>
+<l>endif</l>
+<c></c>
+<c>* Reset the open windows for a clean display.</c>
+<l>set_dict_tuple (ExampleInternals, 'window_images_needed', true)</l>
+<l>dev_display_example_reset_windows (ExampleInternals)</l>
+<c></c>
+<c>* Display the explanatory text.</c>
+<l>get_dict_tuple (ExampleInternals, 'window_text', WindowHandleText)</l>
+<l>dev_set_window (WindowHandleText)</l>
+<c></c>
+<l>Text := 'Model parameter: \'learning_rate\''</l>
+<l>Text[|Text|] := ''</l>
+<l>Text[|Text|] := 'The \'learning_rate\' determines the size of the steps for optimizing'</l>
+<l>Text[|Text|] := 'the loss function:'</l>
+<l>Text[|Text|] := ''</l>
+<l>Text[|Text|] := '     - A too high learning rate might result in divergence of'</l>
+<l>Text[|Text|] := '       the optimization algorithm.'</l>
+<l>Text[|Text|] := '     - A very low learning rate will take unnecessarily many steps.'</l>
+<l>Text[|Text|] := ''</l>
+<l>Text[|Text|] := 'Approximated loss curves for different learning rates are shown below.'</l>
+<l>Text[|Text|] := ' '</l>
+<c></c>
+<l>dev_disp_text (Text, 'window', 'top', 'left', 'black', 'box', 'true')</l>
+<l>dev_disp_text ('Press Run (F5) to continue', 'window', 'bottom', 'right', 'black', [], [])</l>
+<c></c>
+<c>* Display learning rate curve</c>
+<l>get_dict_tuple (ExampleInternals, 'window_images', WindowHandleImages)</l>
+<l>set_part_style (WindowHandleImages, 1)</l>
+<l>dev_set_window (WindowHandleImages)</l>
+<l>read_image (ImageLoss, 'dl_explanation/training_learning_rate_curves')</l>
+<l>get_image_size (ImageLoss, Width, Height)</l>
+<l>dev_set_part (0, 0, Height, Width)</l>
+<l>dev_display (ImageLoss)</l>
+<c></c>
+<l>dev_disp_text ('Loss', 'image', 35, 110, 'black', 'box', 'false')</l>
+<l>dev_disp_text ('Epochs', 'image', 685, 1230, 'black', 'box', 'false')</l>
+<l>dev_disp_text ('good learning rate', 'image', 670, 400, 'blue', 'box', 'false')</l>
+<l>dev_disp_text ('high learning rate', 'image', 530, 500, 'cyan', 'box', 'false')</l>
+<l>dev_disp_text ('very high learning rate', 'image', 220, 920, 'red', 'box', 'false')</l>
+<l>dev_disp_text ('low learning rate', 'image', 375, 800, 'orange', 'box', 'false')</l>
+<l>dev_disp_text ('Loss curves for different learning rates', 'window', 'top', 'center', 'black', 'box', 'true')</l>
+<l>return ()</l>
+</body>
+<docu id="dev_display_screen_learning_rate">
+<parameters>
+<parameter id="ExampleInternals"/>
+</parameters>
+</docu>
+</procedure>
+<procedure name="dev_display_example_reset_windows">
+<interface>
+<ic>
+<par name="ExampleInternals" base_type="ctrl" dimension="0"/>
+</ic>
+</interface>
+<body>
+<c>* This procedure resets the graphics windows .</c>
+<c></c>
+<c>* Close any windows that are listed in key 'window_handles_to_close'.</c>
+<l>try</l>
+<l>    get_dict_tuple (ExampleInternals, 'window_handles_to_close', WindowHandlesToClose)</l>
+<l>catch (Exception)</l>
+<l>    WindowHandlesToClose := []</l>
+<l>endtry</l>
+<c></c>
+<l>for I := 0 to |WindowHandlesToClose| - 1 by 1</l>
+<l>    dev_set_window (WindowHandlesToClose[I])</l>
+<l>    dev_close_window ()</l>
+<l>endfor</l>
+<l>set_dict_tuple (ExampleInternals, 'window_handles_to_close', [])</l>
+<c></c>
+<c>* Open image window if needed</c>
+<l>get_dict_param (ExampleInternals, 'keys', [], WindowHandleKeys)</l>
+<l>tuple_find (WindowHandleKeys, 'window_images', Index)</l>
+<l>get_dict_tuple (ExampleInternals, 'window_images_needed', WindowImagesNeeded)</l>
+<l>if (WindowImagesNeeded and Index == -1)</l>
+<c>    * Open new window for images.</c>
+<l>dev_open_example_image_window (ExampleInternals)</l>
+<l>elseif (not WindowImagesNeeded and Index != -1)</l>
+<c>    * Window for images exists but is not needed -&gt; close it.</c>
+<l>dev_close_example_image_window (ExampleInternals)</l>
+<l>endif</l>
+<c></c>
+<c>* Set the correct area (part) of the image window.</c>
+<l>try</l>
+<l>    get_dict_tuple (ExampleInternals, 'window_images', WindowHandleImages)</l>
+<l>    dev_set_window (WindowHandleImages)</l>
+<l>    dev_clear_window ()</l>
+<l>    dev_set_part (1, 1, -1, -1)</l>
+<l>catch (Exception)</l>
+<l>endtry</l>
+<l>get_dict_tuple (ExampleInternals, 'window_text', WindowHandleText)</l>
+<l>dev_set_window (WindowHandleText)</l>
+<l>dev_clear_window ()</l>
+<l>return ()</l>
+</body>
+<docu id="dev_display_example_reset_windows">
+<parameters>
+<parameter id="ExampleInternals">
+<default_type>integer</default_type>
+<mixed_type>false</mixed_type>
+<sem_type>dict</sem_type>
+<type_list>
+<item>integer</item>
+</type_list>
+</parameter>
+</parameters>
+</docu>
+</procedure>
+<procedure name="dev_display_screen_training_goals_2">
+<interface>
+<ic>
+<par name="ExampleInternals" base_type="ctrl" dimension="0"/>
+</ic>
+</interface>
+<body>
+<c>* This procedure explains the fundamental training goals.</c>
+<c></c>
+<l>get_dict_tuple (ExampleInternals, 'show_example_screens', ShowExampleScreens)</l>
+<l>if (not ShowExampleScreens)</l>
+<l>    return ()</l>
+<l>endif</l>
+<c></c>
+<c>* Reset the open windows for a clean display.</c>
+<l>set_dict_tuple (ExampleInternals, 'window_images_needed', true)</l>
+<l>dev_display_example_reset_windows (ExampleInternals)</l>
+<c></c>
+<c>* Display the explanatory text.</c>
+<l>get_dict_tuple (ExampleInternals, 'window_text', WindowHandleText)</l>
+<l>dev_set_window (WindowHandleText)</l>
+<c></c>
+<l>Text := 'While training there are two main goals to be achieved:'</l>
+<l>Text[|Text|] := ''</l>
+<l>Text[|Text|] := '    1.) The \'loss\' is commonly used to optimize the model on the '</l>
+<l>Text[|Text|] := '        training data. Hence, the objective is to reduce the loss on the '</l>
+<l>Text[|Text|] := '        training data as much as possible.'</l>
+<l>Text[|Text|] := '--&gt; 2.) For the evaluation measure on the validation data the'</l>
+<l>Text[|Text|] := '        \'top1_error\' is usually used for classification.'</l>
+<l>Text[|Text|] := '        This value should have a decreasing trend during '</l>
+<l>Text[|Text|] := '        the training process.'</l>
+<l>Text[|Text|] := ' '</l>
+<l>Text[|Text|] := 'An example of the \'top1_error\' during a successful training'</l>
+<l>Text[|Text|] := 'is displayed below.'</l>
+<c></c>
+<l>dev_disp_text (Text, 'window', 'top', 'left', 'black', 'box', 'true')</l>
+<l>dev_disp_text ('Press Run (F5) to continue', 'window', 'bottom', 'right', 'black', [], [])</l>
+<c></c>
+<c>* Display an explanatory image.</c>
+<l>get_dict_tuple (ExampleInternals, 'window_images', WindowHandleImages)</l>
+<l>set_part_style (WindowHandleImages, 1)</l>
+<l>dev_set_window (WindowHandleImages)</l>
+<l>read_image (ImageLoss, 'dl_explanation/training_class_goals_top1_error')</l>
+<l>get_image_size (ImageLoss, Width, Height)</l>
+<l>dev_set_part (0, 0, Height, Width)</l>
+<l>dev_display (ImageLoss)</l>
+<c></c>
+<l>dev_disp_text ('top1_error', 'window', 12, 70, 'black', [], [])</l>
+<l>return ()</l>
+</body>
+<docu id="dev_display_screen_training_goals_2">
+<parameters>
+<parameter id="ExampleInternals"/>
+</parameters>
+</docu>
+</procedure>
+<procedure name="dev_close_example_windows">
+<interface>
+<ic>
+<par name="ExampleInternals" base_type="ctrl" dimension="0"/>
+</ic>
+</interface>
+<body>
+<c>* This procedure closes all example windows.</c>
+<c></c>
+<l>get_dict_tuple (ExampleInternals, 'show_example_screens', ShowExampleScreens)</l>
+<l>if (not ShowExampleScreens)</l>
+<l>    return ()</l>
+<l>endif</l>
+<c></c>
+<l>get_dict_param (ExampleInternals, 'keys', [], Keys)</l>
+<l>for Index := 0 to |Keys| by 1</l>
+<l>    try</l>
+<l>        get_dict_tuple (ExampleInternals, Keys[Index], WindowHandle)</l>
+<l>        dev_set_window (WindowHandle)</l>
+<l>        dev_close_window ()</l>
+<l>    catch (Exception)</l>
+<l>    endtry</l>
+<l>endfor</l>
+<c></c>
+<l>return ()</l>
+</body>
+<docu id="dev_close_example_windows">
+<parameters>
+<parameter id="ExampleInternals">
+<default_type>integer</default_type>
+<mixed_type>false</mixed_type>
+<sem_type>dict</sem_type>
+<type_list>
+<item>integer</item>
+</type_list>
+</parameter>
+</parameters>
+</docu>
+</procedure>
+<procedure name="dev_display_screen_other_params">
+<interface>
+<ic>
+<par name="ExampleInternals" base_type="ctrl" dimension="0"/>
+</ic>
+</interface>
+<body>
+<c>* This procedure explains generic training parameters.</c>
+<c></c>
+<l>get_dict_tuple (ExampleInternals, 'show_example_screens', ShowExampleScreens)</l>
+<l>if (not ShowExampleScreens)</l>
+<l>    return ()</l>
+<l>endif</l>
+<c></c>
+<c>* Reset the open windows for a clean display.</c>
+<l>set_dict_tuple (ExampleInternals, 'window_images_needed', false)</l>
+<l>dev_display_example_reset_windows (ExampleInternals)</l>
+<c></c>
+<c>* Display the explanatory text.</c>
+<l>get_dict_tuple (ExampleInternals, 'window_text', WindowHandleText)</l>
+<l>dev_set_window (WindowHandleText)</l>
+<c></c>
+<l>Text := 'Additionally, there are more advanced parameters that can be specified'</l>
+<l>Text[|Text|] := 'to enhance the training process, for example parameters for:'</l>
+<l>Text[|Text|] := ''</l>
+<l>Text[|Text|] := '   - Data augmentation (e.g., \'augmentation_percentage\', \'rotation\')'</l>
+<l>Text[|Text|] := '   - Change strategy (e.g., to adapt the \'learning_rate\' during training)'</l>
+<l>Text[|Text|] := '   - Evaluation measure (e.g., \'top1_error\')'</l>
+<l>Text[|Text|] := ' '</l>
+<c></c>
+<l>dev_disp_text (Text, 'window', 'top', 'left', 'black', 'box', 'true')</l>
+<l>dev_disp_text ('Press Run (F5) to continue', 'window', 'bottom', 'right', 'black', [], [])</l>
+<c></c>
+<l>return ()</l>
+</body>
+<docu id="dev_display_screen_other_params">
+<parameters>
+<parameter id="ExampleInternals"/>
+</parameters>
+</docu>
+</procedure>
+<procedure name="dev_display_screen_training_process">
+<interface>
+<ic>
+<par name="ExampleInternals" base_type="ctrl" dimension="0"/>
+</ic>
+</interface>
+<body>
+<c>* This procedure explains train_dl_model.</c>
+<c></c>
+<l>get_dict_tuple (ExampleInternals, 'show_example_screens', ShowExampleScreens)</l>
+<l>if (not ShowExampleScreens)</l>
+<l>    return ()</l>
+<l>endif</l>
+<c></c>
+<c>* Reset the open windows for a clean display.</c>
+<l>set_dict_tuple (ExampleInternals, 'window_images_needed', false)</l>
+<l>dev_display_example_reset_windows (ExampleInternals)</l>
+<c></c>
+<c>* Display the explanatory text.</c>
+<l>get_dict_tuple (ExampleInternals, 'window_text', WindowHandleText)</l>
+<l>dev_set_window (WindowHandleText)</l>
+<c></c>
+<l>Text := 'After the parameters are set, the model can be trained'</l>
+<l>Text[|Text|] := 'on the dataset with the procedure \'train_dl_model\'.'</l>
+<l>Text[|Text|] := ''</l>
+<l>Text[|Text|] := 'During the training the best training model is stored'</l>
+<l>Text[|Text|] := 'and written to disk after the corresponding training step.'</l>
+<l>Text[|Text|] := ' '</l>
+<c></c>
+<l>dev_disp_text (Text, 'window', 'top', 'left', 'black', 'box', 'true')</l>
+<l>dev_disp_text ('Press Run (F5) to continue', 'window', 'bottom', 'right', 'black', [], [])</l>
+<c></c>
+<l>return ()</l>
+</body>
+<docu id="dev_display_screen_training_process">
+<parameters>
+<parameter id="ExampleInternals"/>
+</parameters>
+</docu>
+</procedure>
+<procedure name="dev_open_example_image_window">
+<interface>
+<ic>
+<par name="ExampleInternals" base_type="ctrl" dimension="0"/>
+</ic>
+</interface>
+<body>
+<c>* This procedure initializes bottom graphics window.</c>
+<c></c>
+<l>WindowWidthText := 800</l>
+<l>WindowHeightText := 330</l>
+<l>WindowWidthImage := 800</l>
+<l>WindowHeightImages := 400</l>
+<l>WindowBGColor := 'gray'</l>
+<l>WindowYImages := WindowHeightText + 60</l>
+<l>WindowXImages := 0</l>
+<l>dev_open_window (WindowYImages, WindowXImages, WindowWidthImage, WindowHeightImages, WindowBGColor, WindowHandleImages)</l>
+<l>set_display_font (WindowHandleImages, 16, 'mono', 'true', 'false')</l>
+<l>set_dict_tuple (ExampleInternals, 'window_images', WindowHandleImages)</l>
+<l>set_dict_tuple (ExampleInternals, 'window_images_width', WindowWidthImage)</l>
+<l>set_dict_tuple (ExampleInternals, 'window_images_height', WindowHeightImages)</l>
+<l>set_dict_tuple (ExampleInternals, 'window_images_x', WindowXImages)</l>
+<l>set_dict_tuple (ExampleInternals, 'window_images_y', WindowYImages)</l>
+<l>return ()</l>
+</body>
+<docu id="dev_open_example_image_window">
+<parameters>
+<parameter id="ExampleInternals"/>
+</parameters>
+</docu>
+</procedure>
+<procedure name="check_data_availability">
+<interface>
+<ic>
+<par name="ExampleDataDir" base_type="ctrl" dimension="0"/>
+<par name="DLDatasetFileName" base_type="ctrl" dimension="0"/>
+<par name="DLPreprocessParamFileName" base_type="ctrl" dimension="0"/>
+</ic>
+</interface>
+<body>
+<c>* This procedure checks whether the required files are available.</c>
+<c></c>
+<l>file_exists (ExampleDataDir, PathExists)</l>
+<l>if (not PathExists)</l>
+<l>    throw (ExampleDataDir + ' does not exist. Please run part 1 of the example series.')</l>
+<l>endif</l>
+<c></c>
+<l>file_exists (DLPreprocessParamFileName, FileExists)</l>
+<l>if (not FileExists)</l>
+<l>    throw (DLPreprocessParamFileName + ' does not exist. Please run part 1 of the example series.')</l>
+<l>endif</l>
+<c></c>
+<l>file_exists (DLDatasetFileName, FileExists)</l>
+<l>if (not FileExists)</l>
+<l>    throw (DLDatasetFileName + ' does not exist. Please run part 1 of the example series.')</l>
+<l>endif</l>
+<c></c>
+<l>return ()</l>
+</body>
+<docu id="check_data_availability">
+<parameters>
+<parameter id="DLDatasetFileName"/>
+<parameter id="DLPreprocessParamFileName"/>
+<parameter id="ExampleDataDir"/>
+</parameters>
+</docu>
+</procedure>
+<procedure name="dev_display_screen_device">
+<interface>
+<ic>
+<par name="ExampleInternals" base_type="ctrl" dimension="0"/>
+<par name="DLDevice" base_type="ctrl" dimension="0"/>
+</ic>
+</interface>
+<body>
+<c>* This procedure displays information about the used device.</c>
+<c></c>
+<c>* Reset the open windows for a clean display.</c>
+<l>set_dict_tuple (ExampleInternals, 'window_images_needed', false)</l>
+<l>set_dict_tuple (ExampleInternals, 'window_legend_needed', false)</l>
+<l>dev_display_example_reset_windows (ExampleInternals)</l>
+<c></c>
+<c>* Display the explanatory text.</c>
+<l>get_dict_tuple (ExampleInternals, 'window_text', WindowHandleText)</l>
+<l>dev_set_window (WindowHandleText)</l>
+<c></c>
+<l>get_dl_device_param (DLDevice, 'type', DLDeviceType)</l>
+<l>get_dl_device_param (DLDevice, 'name', DLDeviceName)</l>
+<c></c>
+<l>Text := 'This example can be run on a GPU or CPU.'</l>
+<l>Text[|Text|] := ''</l>
+<l>if (DLDeviceType != 'gpu')</l>
+<l>    Text[|Text|] := 'No GPU with necessary drivers and libraries has been found.'</l>
+<l>    Text[|Text|] := ''</l>
+<l>endif</l>
+<l>Text[|Text|] := 'This example will run the deep learning operators'</l>
+<l>Text[|Text|] := 'on the following device:'</l>
+<l>Text[|Text|] := 'Device type: ' + DLDeviceType</l>
+<l>Text[|Text|] := 'Device name: ' + DLDeviceName</l>
+<c></c>
+<l>dev_disp_text (Text, 'window', 'top', 'left', 'black', 'box', 'true')</l>
+<l>dev_disp_text ('Press Run (F5) to continue', 'window', 'bottom', 'right', 'black', [], [])</l>
+<c></c>
+<l>return ()</l>
+</body>
+<docu id="dev_display_screen_device">
+<abstract lang="en_US">Display a message to mention on which device the deep learning operators will run.</abstract>
+<parameters>
+<parameter id="DLDevice"/>
+<parameter id="ExampleInternals"/>
+</parameters>
+</docu>
+</procedure>
+</hdevelop>

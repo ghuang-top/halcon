@@ -1,0 +1,192 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<hdevelop file_version="1.2" halcon_version="22.11.2.0">
+<procedure name="main">
+<interface/>
+<body>
+<c>* 深度学习分类工作流程：</c>
+<c>* </c>
+<c>* 此示例演示了基于深度学习的分类的整体工作流程。</c>
+<c>* </c>
+<c>* 请注意：</c>
+<c>* - 这是一个简化的示例。</c>
+<c>* - 在这里尽可能使用默认参数。</c>
+<c>* - 对于更详细的步骤，请参阅系列中的相应示例：</c>
+<c>*   例如，classify_pill_defects_deep_learning_1_preprocess.hdev等。</c>
+<c>* </c>
+<l>dev_close_window ()</l>
+<l>dev_update_off ()</l>
+<l>set_system ('seed_rand', 42)</l>
+<c>* </c>
+<c>* ***   0) 设置输入/输出路径   ***</c>
+<c>* </c>
+<l>get_system ('example_dir', PathExample)</l>
+<c>* 给出包含图像的所有文件夹。</c>
+<l>ImageBaseFolder := PathExample + '/images/food/'</l>
+<l>RawImageFolder := ImageBaseFolder + ['apple_braeburn', 'apple_golden_delicious', 'apple_topaz', 'peach', 'pear']</l>
+<l>OutputDir := 'classify_fruits_data'</l>
+<c>* 如果运行此程序后应删除结果，请将其设置为true。</c>
+<l>RemoveResults := false</l>
+<c>* </c>
+<c>* ***   1.) 准备   ***</c>
+<c>* </c>
+<c>* 读取一个DLDataset。</c>
+<c>* 或者，您可以读取一个由MVTec深度学习工具创建的DLDataset字典，</c>
+<c>* 如read_dict（）所示。</c>
+<l>read_dl_dataset_classification (RawImageFolder, 'last_folder', DLDataset)</l>
+<c>* </c>
+<c>* 读取预训练的分类模型。</c>
+<l>read_dl_model ('pretrained_dl_classifier_compact.hdl', DLModelHandle)</l>
+<c>* 设置模型的类别名称。</c>
+<l>set_dl_model_param (DLModelHandle, 'class_names', DLDataset.class_names)</l>
+<c>* </c>
+<c>* 对DLDataset中的数据进行预处理。</c>
+<l>split_dl_dataset (DLDataset, 70, 15, [])</l>
+<c>* 我们明确希望使用模型参数来预处理数据集。</c>
+<l>create_dl_preprocess_param_from_model (DLModelHandle, 'none', 'full_domain', [], [], [], DLPreprocessParam)</l>
+<c>* </c>
+<l>PreprocessSettings := dict{overwrite_files: 'auto'}</l>
+<l>preprocess_dl_dataset (DLDataset, OutputDir, DLPreprocessParam, PreprocessSettings, DLDatasetFileName)</l>
+<c>* </c>
+<c>* 对随机选择的10个预处理的DLSamples进行视觉检查。</c>
+<l>WindowDict := dict{}</l>
+<l>DatasetSamples := DLDataset.samples</l>
+<l>for Index := 0 to 9 by 1</l>
+<l>    SampleIndex := round(rand(1) * (|DatasetSamples| - 1))</l>
+<l>    read_dl_samples (DLDataset, SampleIndex, DLSample)</l>
+<l>    dev_display_dl_data (DLSample, [], DLDataset, 'classification_ground_truth', [], WindowDict)</l>
+<l>    dev_disp_text ('按Run (F5)继续', 'window', 'bottom', 'right', 'black', [], [])</l>
+<l>    stop ()</l>
+<l>endfor</l>
+<l>dev_close_window_dict (WindowDict)</l>
+<c>* </c>
+<c>* ***   2.) 训练   ***</c>
+<c>* </c>
+<c>* 设置与训练相关的模型参数。</c>
+<c>* 可以在GPU或CPU上执行训练。</c>
+<c>* 请参阅安装指南中的相应系统要求。</c>
+<c>* 如果可能，此示例将使用GPU。</c>
+<c>* 如果您明确希望在CPU上运行此示例，请选择CPU设备。</c>
+<l>query_available_dl_devices (['runtime', 'runtime'], ['gpu', 'cpu'], DLDeviceHandles)</l>
+<l>if (|DLDeviceHandles| == 0)</l>
+<l>    throw ('未找到支持的设备以继续此示例。')</l>
+<l>endif</l>
+<c>* 由于在query_available_dl_devices中使用的过滤器，如果可用，第一个设备将是GPU。</c>
+<l>DLDevice := DLDeviceHandles[0]</l>
+<l>get_dl_device_param (DLDevice, 'type', DLDeviceType)</l>
+<l>if (DLDeviceType == 'cpu')</l>
+<c>    * 使用的线程数可能会影响</c>
+<c>    * 训练持续时间。</c>
+<l>    NumThreadsTraining := 4</l>
+<l>    set_system ('thread_num', NumThreadsTraining)</l>
+<l>endif</l>
+<c>* </c>
+<c>* 有关详细信息，请参阅set_dl_model_param（）和get_dl_model_param（）的文档。</c>
+<l>if (DLDeviceType == 'gpu')</l>
+<l>    set_dl_model_param_max_gpu_batch_size (DLModelHandle, 100)</l>
+<l>else</l>
+<l>    set_dl_model_param (DLModelHandle, 'batch_size', 64)</l>
+<l>endif</l>
+<l>set_dl_model_param (DLModelHandle, 'learning_rate', 0.001)</l>
+<l>set_dl_model_param (DLModelHandle, 'device', DLDevice)</l>
+<c>* </c>
+<c>* 在这里，我们进行了20个时期的简短训练。</c>
+<c>* 为了获得更好的模型性能，可以增加时期数，</c>
+<c>* 从20增加到例如40。</c>
+<l>create_dl_train_param (DLModelHandle, 20, 1, 'true', 42, [], [], TrainParam)</l>
+<c>* 训练和因此调用train_dl_model_batch（）</c>
+<c>* 是使用以下过程完成的。</c>
+<l>train_dl_model (DLDataset, DLModelHandle, TrainParam, 0, TrainResults, TrainInfos, EvaluationInfos)</l>
+<c>* </c>
+<c>* 读取最佳模型，该模型由train_dl_model写入文件。</c>
+<l>read_dl_model ('model_best.hdl', DLModelHandle)</l>
+<l>dev_disp_text ('按F5继续', 'window', 'bottom', 'left', 'black', [], [])</l>
+<l>stop ()</l>
+<l>dev_close_window ()</l>
+<l>dev_close_window ()</l>
+<c>* </c>
+<c>* ***   3.) 评估   ***</c>
+<c>* </c>
+<c>* 设置通用的评估参数。</c>
+<l>GenParamEval := dict{class_names_to_evaluate: 'global'}</l>
+<l>GenParamEval.measures := ['top1_error', 'precision', 'recall', 'f_score', 'absolute_confusion_matrix']</l>
+<c>* </c>
+<c>* 评估已训练的模型。</c>
+<l>set_dl_model_param (DLModelHandle, 'device', DLDevice)</l>
+<l>evaluate_dl_model (DLDataset, DLModelHandle, 'split', 'test', GenParamEval, EvaluationResult, EvalParams)</l>
+<c>* </c>
+<l>EvalDisplayMode := dict{display_mode: ['measures', 'pie_charts_precision', 'pie_charts_recall', 'absolute_confusion_matrix']}</l>
+<l>WindowDict := dict{}</l>
+<l>dev_display_classification_evaluation (EvaluationResult, EvalParams, EvalDisplayMode, WindowDict)</l>
+<l>dev_disp_text ('按F5继续', 'window', 'bottom', 'right', 'black', [], [])</l>
+<l>stop ()</l>
+<l>dev_close_window_dict (WindowDict)</l>
+<c>* </c>
+<c>* 为推断优化模型，</c>
+<c>* 意味着减少其内存消耗。</c>
+<l>set_dl_model_param (DLModelHandle, 'optimize_for_inference', 'true')</l>
+<l>set_dl_model_param (DLModelHandle, 'batch_size', 1)</l>
+<c>* 将模型保存在此优化状态下。</c>
+<l>write_dl_model (DLModelHandle, 'model_best.hdl')</l>
+<c>* </c>
+<c>* ***   4.) 推断   ***</c>
+<c>* </c>
+<c>* 为了演示推断步骤，我们将训练好的模型应用于一些随机选择的示例图像。</c>
+<l>list_image_files (RawImageFolder, 'default', 'recursive', ImageFiles)</l>
+<l>WindowDict := dict{}</l>
+<l>for IndexInference := 0 to 9 by 1</l>
+<l>    SampleIndex := round(rand(1) * (|DatasetSamples| - 1))</l>
+<l>    read_image (Image, ImageFiles[SampleIndex])</l>
+<l>    gen_dl_samples_from_images (Image, DLSample)</l>
+<l>    preprocess_dl_samples (DLSample, DLPreprocessParam)</l>
+<l>    apply_dl_model (DLModelHandle, DLSample, [], DLResult)</l>
+<c>    * </c>
+<l>    dev_display_dl_data (DLSample, DLResult, DLDataset, 'classification_result', [], WindowDict)</l>
+<l>    stop ()</l>
+<l>endfor</l>
+<l>dev_close_window_dict (WindowDict)</l>
+<c>* </c>
+<c>* *** 5.) 删除文件 ***</c>
+<c>* </c>
+<l>clean_up_output (OutputDir, RemoveResults)</l>
+<c></c>
+</body>
+<docu id="main">
+<parameters/>
+</docu>
+</procedure>
+<procedure name="clean_up_output">
+<interface>
+<ic>
+<par name="OutputDir" base_type="ctrl" dimension="0"/>
+<par name="RemoveResults" base_type="ctrl" dimension="0"/>
+</ic>
+</interface>
+<body>
+<c>* This local example procedure cleans up the output of the example.</c>
+<c></c>
+<l>if (not RemoveResults)</l>
+<l>    return ()</l>
+<l>endif</l>
+<c>* Display a warning.</c>
+<l>dev_open_window (0, 0, 600, 300, 'black', WindowHandle)</l>
+<l>set_display_font (WindowHandle, 16, 'mono', 'true', 'false')</l>
+<l>WarningCleanup := ['Congratulations, you have finished the example.', '', 'Unless you would like to use the output data / model,', 'press F5 to clean up.']</l>
+<l>dev_disp_text (WarningCleanup, 'window', 'center', 'center', ['black', 'black', 'coral', 'coral', 'coral'], [], [])</l>
+<c></c>
+<l>stop ()</l>
+<l>dev_close_window ()</l>
+<c></c>
+<c>* Delete all outputs of the example.</c>
+<l>remove_dir_recursively (OutputDir)</l>
+<l>delete_file ('model_best.hdl')</l>
+<l>delete_file ('model_best_info.hdict')</l>
+<l>return ()</l>
+</body>
+<docu id="clean_up_output">
+<parameters>
+<parameter id="OutputDir"/>
+<parameter id="RemoveResults"/>
+</parameters>
+</docu>
+</procedure>
+</hdevelop>

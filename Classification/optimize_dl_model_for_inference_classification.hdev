@@ -1,0 +1,1006 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<hdevelop file_version="1.2" halcon_version="22.11.2.0">
+<procedure name="main">
+<interface/>
+<body>
+<c>* 此示例展示了如何使用AI²接口和Nvidia TensorRT插件优化训练过的分类模型以用于推理。</c>
+<c>* </c>
+<c>* 请注意：此示例基于深度学习分类示例系列的输出：</c>
+<c>* - 第1部分classify_pill_defects_deep_learning_1_preprocess.hdev的预处理图像。</c>
+<c>* - （可选）第2部分classify_pill_defects_deep_learning_2_train.hdev的预训练模型，如果设置UsePretrainedModel := false。</c>
+<c>* </c>
+<l>dev_update_off ()</l>
+<c>* </c>
+<c>* 在此示例中，优化是通过图形窗口解释的，然后才执行。将以下参数设置为false以跳过此可视化。</c>
+<l>ShowExampleScreens := true</l>
+<c>* </c>
+<c>* 默认情况下，此示例使用MVTec提供的预训练模型。要使用此示例系列第2部分中训练的模型，请将以下变量设置为false。</c>
+<l>UsePretrainedModel := true</l>
+<c>* </c>
+<c>* 此示例需要Nvidia TensorRT兼容的GPU和AI²接口的Nvidia TensorRT插件。</c>
+<c>* 此示例基线设备使用GPU设备。</c>
+<l>query_available_dl_devices ('runtime', 'gpu', DLDeviceHandles)</l>
+<l>if (|DLDeviceHandles| == 0)</l>
+<l>    throw ('未找到支持的设备以继续此示例。')</l>
+<l>endif</l>
+<c>* 此示例还将需要CPU设备。</c>
+<l>query_available_dl_devices ('runtime', 'cpu', DLDeviceHandlesCpu)</l>
+<l>if (|DLDeviceHandlesCpu| == 0)</l>
+<l>    throw ('未找到支持的设备以继续此示例。')</l>
+<l>endif</l>
+<l>DeviceHandleCpu := DLDeviceHandlesCpu[0]</l>
+<c>* 由于在query_available_dl_devices中使用的过滤器，如果可用，第一个设备将是GPU。</c>
+<l>DLDeviceBaseLine := DLDeviceHandles[0]</l>
+<c>* </c>
+<c>* 为了优化模型的执行，请选择一个TensorRT设备。</c>
+<l>query_available_dl_devices ('ai_accelerator_interface', 'tensorrt', DLDeviceHandles)</l>
+<l>if (|DLDeviceHandles| &gt; 0)</l>
+<l>    DLDeviceTensorRT := DLDeviceHandles[0]</l>
+<l>else</l>
+<l>    throw ('未找到支持的设备以继续此示例。请确保安装了TensorRT插件！')</l>
+<l>endif</l>
+<c>* </c>
+<l>if (ShowExampleScreens)</l>
+<c>    * 初始示例窗口和参数等。</c>
+<l>    dev_example_init (ShowExampleScreens, UsePretrainedModel, ExampleInternals)</l>
+<c>    * </c>
+<c>    * 示例系列介绍文本。</c>
+<l>    dev_display_screen_introduction (ExampleInternals)</l>
+<l>    stop ()</l>
+<c>    * </c>
+<l>    dev_display_screen_device (ExampleInternals, DLDeviceTensorRT)</l>
+<l>    stop ()</l>
+<c>    * </c>
+<l>    dev_display_screen_optimize_dl_model_for_inference (ExampleInternals)</l>
+<l>    stop ()</l>
+<l>endif</l>
+<c>* </c>
+<c>* </c>
+<c>* ********************************************************</c>
+<c>* **   设置优化的路径和参数   ***</c>
+<c>* ********************************************************</c>
+<c>* </c>
+<c>* 路径。</c>
+<c>* </c>
+<c>* 由HALCON编写的任何输出的项目目录。</c>
+<l>ExampleDataDir := 'classify_pill_defects_data'</l>
+<c>* 预处理的DLDataset的文件路径。</c>
+<c>* 注意：在使用其他图像尺寸预处理后，请调整DataDirectory。</c>
+<l>DataDirectory := ExampleDataDir + '/dldataset_pill_300x300'</l>
+<l>DLDatasetFileName := DataDirectory + '/dl_dataset.hdict'</l>
+<c>* </c>
+<l>if (UsePretrainedModel)</l>
+<c>    * 使用HALCON提供的预训练模型。</c>
+<l>    RetrainedModelFileName := 'classify_pill_defects.hdl'</l>
+<l>else</l>
+<c>    * 重新训练的分类模型的路径。</c>
+<l>    RetrainedModelFileName := ExampleDataDir + '/best_dl_model_classification.hdl'</l>
+<l>endif</l>
+<c>* </c>
+<c>* 评估参数。</c>
+<c>* </c>
+<c>* 评估指标。</c>
+<l>ClassificationMeasures := 'top1_error'</l>
+<c>* 评估和基准测试期间使用的批量大小。</c>
+<c>* 使用BatchSize = 1作为推理的最现实值。</c>
+<l>BatchSize := 1</l>
+<c>* </c>
+<c>* *************************************************************</c>
+<c>* **   模型优化为不同精度   ***</c>
+<c>* *************************************************************</c>
+<c>* </c>
+<c>* 检查所有必要的文件是否存在。</c>
+<l>check_data_availability (ExampleDataDir, DLDatasetFileName, RetrainedModelFileName, UsePretrainedModel)</l>
+<c>* </c>
+<c>* 读取重新训练的模型。</c>
+<l>read_dl_model (RetrainedModelFileName, DLModelHandle)</l>
+<c>* </c>
+<l>set_dl_model_param (DLModelHandle, 'batch_size', BatchSize)</l>
+<c>* </c>
+<l>set_dl_model_param (DLModelHandle, 'device', DLDeviceBaseLine)</l>
+<c>* </c>
+<c>* 读取预处理的DLDataset文件。</c>
+<l>read_dict (DLDatasetFileName, [], [], DLDataset)</l>
+<c>* </c>
+<c>* 使用字典收集此示例中获得的结果。</c>
+<l>ResultCollector := dict{}</l>
+<c>* </c>
+<c>* 设置评估参数。</c>
+<l>GenParamEval := dict{measures: ClassificationMeasures}</l>
+<c>* </c>
+<c>* 首先，在基线设备上评估重新训练的模型。</c>
+<c>* </c>
+<l>Precision := 'float32'</l>
+<l>dev_display_example_show_current_stage (ExampleInternals, 'float32')</l>
+<l>evaluate_dl_model (DLDataset, DLModelHandle, 'split', 'test', GenParamEval, EvaluationResultBaseLine, EvalParams)</l>
+<c>* </c>
+<c>* 在基线设备上对重新训练的模型进行基准测试</c>
+<l>bench_dl_model (DLModelHandle, DLDataset, TimePerBatchBaseLine)</l>
+<c></c>
+<c>* 将结果添加到ResultCollector</c>
+<l>collect_results (ResultCollector, DLModelHandle, TimePerBatchBaseLine, EvaluationResultBaseLine)</l>
+<l>if (ShowExampleScreens)</l>
+<l>    dev_display_example_continue_message (ExampleInternals)</l>
+<l>    stop ()</l>
+<l>endif</l>
+<c>* </c>
+<c>* </c>
+<c>* 现在，在TensorRT设备上将重新训练的模型优化为'float16'推理。</c>
+<c>* </c>
+<c>* 并非所有设备都支持硬件加速的float16。对于这些设备，</c>
+<c>* optimize_dl_model_for_inference不支持'float16'精度。使用'float32'</c>
+<c>* 代替，这可能比默认的GPU实现更快。</c>
+<l>get_dl_device_param (DLDeviceTensorRT, 'info', TensorRTDeviceInfo)</l>
+<l>HasFastFp16 := TensorRTDeviceInfo.has_fast_fp16</l>
+<l>if (HasFastFp16 == 'false')</l>
+<l>    DisplayPrecision := 'float32_fallback'</l>
+<l>    Precision := 'float32'</l>
+<l>else</l>
+<l>    DisplayPrecision := 'float16'</l>
+<l>    Precision := 'float16'</l>
+<l>endif</l>
+<l>dev_display_example_show_current_stage (ExampleInternals, DisplayPrecision)</l>
+<c>* GPU上的模型可能会阻止用于校准和最终TensorRT模型的资源。通过设置CPU设备来释放这些资源。</c>
+<l>set_dl_model_param (DLModelHandle, 'device', DeviceHandleCpu)</l>
+<c>* 要将模型转换为'float16'/'float32'精度，无需提供样本以进行optimize_dl_model_for_inference。</c>
+<c>* 不需要额外的转换参数，因此使用默认参数。</c>
+<l>get_dl_device_param (DLDeviceTensorRT, 'optimize_for_inference_params', OptimizeForInferenceParams)</l>
+<l>optimize_dl_model_for_inference (DLModelHandle, DLDeviceTensorRT, Precision, [], OptimizeForInferenceParams, DLModelHandleTensorRT, ConversionReport)</l>
+<c>* </c>
+<c>* 在TensorRT设备上评估校准模型。</c>
+<l>evaluate_dl_model (DLDataset, DLModelHandleTensorRT, 'split', 'test', GenParamEval, EvaluationResultTensorRT, EvalParams)</l>
+<c>* </c>
+<c>* 在TensorRT设备上对校准模型进行基准测试。</c>
+<l>bench_dl_model (DLModelHandleTensorRT, DLDataset, TimePerBatchTensorRT)</l>
+<c>* </c>
+<c>* 将结果添加到ResultCollector</c>
+<l>collect_results (ResultCollector, DLModelHandleTensorRT, TimePerBatchTensorRT, EvaluationResultTensorRT)</l>
+<l>if (ShowExampleScreens)</l>
+<l>    dev_display_example_continue_message (ExampleInternals)</l>
+<l>    stop ()</l>
+<l>endif</l>
+<c>* </c>
+<c>* 现在在TensorRT设备上将模型校准为'int8'精度。</c>
+<c>* （如果设备支持'int8'）</c>
+<c>* </c>
+<l>HasFastInt8 := TensorRTDeviceInfo.has_fast_int8</l>
+<l>if (HasFastInt8 == 'true')</l>
+<l>    dev_display_example_show_current_stage (ExampleInternals, 'int8')</l>
+<c>    * 先前用'float16'模型在GPU上阻止了资源。为了最大限度地提高优化模型的性能，</c>
+<c>    * 有必要释放这些资源。</c>
+<l>    DLModelHandleTensorRT := []</l>
+<c>    * 获取用于模型校准的样本。这些样本应该是训练数据的代表性子集。</c>
+<l>    get_calibration_sample_indices (DLDataset, 10, 'train', CalibrationSampleIndices)</l>
+<l>    read_dl_samples (DLDataset, CalibrationSampleIndices, DLSamplesCalibration)</l>
+<c>    * 不需要额外的转换参数，因此使用默认参数</c>
+<l>    get_dl_device_param (DLDeviceTensorRT, 'optimize_for_inference_params', OptimizeForInferenceParams)</l>
+<l>    optimize_dl_model_for_inference (DLModelHandle, DLDeviceTensorRT, 'int8', DLSamplesCalibration, OptimizeForInferenceParams, DLModelHandleTensorRT, ConversionReport)</l>
+<c>    * </c>
+<c>    * 在TensorRT设备上评估校准模型。</c>
+<l>    evaluate_dl_model (DLDataset, DLModelHandleTensorRT, 'split', 'test', GenParamEval, EvaluationResultTensorRT, EvalParams)</l>
+<c>    * </c>
+<c>    * 在TensorRT设备上对校准模型进行基准测试。</c>
+<l>    bench_dl_model (DLModelHandleTensorRT, DLDataset, TimePerBatchTensorRT)</l>
+<c>    * </c>
+<c>    * 将结果添加到ResultCollector</c>
+<l>    collect_results (ResultCollector, DLModelHandleTensorRT, TimePerBatchTensorRT, EvaluationResultTensorRT)</l>
+<l>    if (ShowExampleScreens)</l>
+<l>        dev_display_example_continue_message (ExampleInternals)</l>
+<l>        stop ()</l>
+<l>    endif</l>
+<l>endif</l>
+<c>* </c>
+<c>* ******************************</c>
+<c>* **   显示结果   ***</c>
+<c>* ******************************</c>
+<c>* </c>
+<l>dev_display_example_show_results (ExampleInternals, ResultCollector)</l>
+<l>stop ()</l>
+<c>* </c>
+<l>if (ShowExampleScreens)</l>
+<c>    * 关闭示例窗口。</c>
+<l>    dev_close_example_windows (ExampleInternals)</l>
+<l>endif</l>
+<c></c>
+</body>
+<docu id="main">
+<parameters/>
+</docu>
+</procedure>
+<procedure name="dev_display_screen_optimize_dl_model_for_inference">
+<interface>
+<ic>
+<par name="ExampleInternals" base_type="ctrl" dimension="0"/>
+</ic>
+</interface>
+<body>
+<c>* This procedure shows an overview of what this example does</c>
+<c></c>
+<l>get_dict_tuple (ExampleInternals, 'show_example_screens', ShowExampleScreens)</l>
+<l>if (not ShowExampleScreens)</l>
+<l>    return ()</l>
+<l>endif</l>
+<c></c>
+<c>* * Reset the open windows for a clean display.</c>
+<l>set_dict_tuple (ExampleInternals, 'window_images_needed', false)</l>
+<l>set_dict_tuple (ExampleInternals, 'window_legend_needed', false)</l>
+<l>dev_display_example_reset_windows (ExampleInternals)</l>
+<c></c>
+<l>get_dict_tuple (ExampleInternals, 'window_text', WindowHandleText)</l>
+<l>dev_set_window (WindowHandleText)</l>
+<c></c>
+<c>* Display introduction text.</c>
+<l>Text := 'This example uses the model trained in the previous parts of this series to'</l>
+<l>Text[|Text|] := 'show how to use \'optimize_dl_model_for_inference\' to use a model'</l>
+<l>Text[|Text|] := 'with TensorRT devices.'</l>
+<l>Text[|Text|] := 'The model is converted to \'float16\' and \'int8\' precision and shows'</l>
+<l>Text[|Text|] := 'how this influences the performance and the throughput of the model.'</l>
+<l>Text[|Text|] := ''</l>
+<l>Text[|Text|] := 'For the conversion to \'int8\' this example also shows how to pass'</l>
+<l>Text[|Text|] := 'calibration samples to \'optimize_dl_model_for_inference\''</l>
+<c></c>
+<l>dev_disp_text (Text, 'window', 'top', 'left', 'black', 'box', 'true')</l>
+<c></c>
+<l>dev_disp_text ('Press Run (F5) to continue', 'window', 'bottom', 'right', 'black', 'box', 'true')</l>
+<c></c>
+<l>return ()</l>
+</body>
+<docu id="dev_display_screen_optimize_dl_model_for_inference">
+<parameters>
+<parameter id="ExampleInternals"/>
+</parameters>
+</docu>
+</procedure>
+<procedure name="bench_dl_model">
+<interface>
+<ic>
+<par name="DLModelHandle" base_type="ctrl" dimension="0"/>
+<par name="DLDataset" base_type="ctrl" dimension="0"/>
+</ic>
+<oc>
+<par name="TimePerBatch" base_type="ctrl" dimension="0"/>
+</oc>
+</interface>
+<body>
+<c>* This local procedure benchmarks the inference of the classification model</c>
+<c>* DLModelHandle.</c>
+<c></c>
+<l>get_dl_model_param (DLModelHandle, 'batch_size', BatchSize)</l>
+<c></c>
+<c>* Run the benchmark for 5 seconds.</c>
+<l>TotalTime := 5</l>
+<l>read_dl_samples (DLDataset, [0:BatchSize - 1], DLSampleBatch)</l>
+<l>apply_dl_model (DLModelHandle, DLSampleBatch, [], DLResultBatch)</l>
+<l>apply_dl_model (DLModelHandle, DLSampleBatch, [], DLResultBatch)</l>
+<l>Iterations := 0</l>
+<l>count_seconds (Start)</l>
+<l>repeat</l>
+<l>    apply_dl_model (DLModelHandle, DLSampleBatch, [], DLResultBatch)</l>
+<l>    Iterations := Iterations + 1</l>
+<l>    count_seconds (Current)</l>
+<l>    Elapsed := Current - Start</l>
+<l>until (Elapsed &gt; TotalTime)</l>
+<l>TimePerBatch := Elapsed / Iterations</l>
+<l>return ()</l>
+</body>
+<docu id="bench_dl_model">
+<parameters>
+<parameter id="DLDataset"/>
+<parameter id="DLModelHandle"/>
+<parameter id="TimePerBatch"/>
+</parameters>
+</docu>
+</procedure>
+<procedure name="dev_open_example_image_window">
+<interface>
+<ic>
+<par name="ExampleInternals" base_type="ctrl" dimension="0"/>
+</ic>
+</interface>
+<body>
+<c>* This procedure initializes the graphic windows that are used to display example images.</c>
+<c></c>
+<l>WindowHeightText := 300</l>
+<l>WindowWidthImage := 500</l>
+<l>WindowHeightImages := 500</l>
+<l>WindowBGColor := 'gray'</l>
+<c></c>
+<l>WindowYImages := WindowHeightText + 60</l>
+<l>WindowXImages := 0</l>
+<l>dev_open_window (WindowYImages, WindowXImages, WindowWidthImage, WindowHeightImages, WindowBGColor, WindowHandleImages)</l>
+<l>set_display_font (WindowHandleImages, 16, 'mono', 'true', 'false')</l>
+<l>set_dict_tuple (ExampleInternals, 'window_images', WindowHandleImages)</l>
+<l>set_dict_tuple (ExampleInternals, 'window_images_width', WindowWidthImage)</l>
+<l>set_dict_tuple (ExampleInternals, 'window_images_height', WindowHeightImages)</l>
+<l>set_dict_tuple (ExampleInternals, 'window_images_x', WindowXImages)</l>
+<l>set_dict_tuple (ExampleInternals, 'window_images_y', WindowYImages)</l>
+<l>return ()</l>
+</body>
+<docu id="dev_open_example_image_window">
+<parameters>
+<parameter id="ExampleInternals"/>
+</parameters>
+</docu>
+</procedure>
+<procedure name="dev_close_example_windows">
+<interface>
+<ic>
+<par name="ExampleInternals" base_type="ctrl" dimension="0"/>
+</ic>
+</interface>
+<body>
+<c>* This procedure closes all example windows.</c>
+<c></c>
+<l>get_dict_tuple (ExampleInternals, 'show_example_screens', ShowExampleScreens)</l>
+<l>if (not ShowExampleScreens)</l>
+<l>    return ()</l>
+<l>endif</l>
+<c></c>
+<l>get_dict_param (ExampleInternals, 'keys', [], Keys)</l>
+<l>for Index := 0 to |Keys| by 1</l>
+<l>    try</l>
+<l>        get_dict_tuple (ExampleInternals, Keys[Index], WindowHandle)</l>
+<l>        dev_set_window (WindowHandle)</l>
+<l>        dev_close_window ()</l>
+<l>    catch (Exception)</l>
+<l>    endtry</l>
+<l>endfor</l>
+<c></c>
+<l>return ()</l>
+</body>
+<docu id="dev_close_example_windows">
+<parameters>
+<parameter id="ExampleInternals">
+<default_type>integer</default_type>
+<mixed_type>false</mixed_type>
+<sem_type>dict</sem_type>
+<type_list>
+<item>integer</item>
+</type_list>
+</parameter>
+</parameters>
+</docu>
+</procedure>
+<procedure name="dev_display_example_reset_windows">
+<interface>
+<ic>
+<par name="ExampleInternals" base_type="ctrl" dimension="0"/>
+</ic>
+</interface>
+<body>
+<c>* This procedure resets the graphics windows.</c>
+<c></c>
+<c>* Close any windows that are listed in key 'window_handles_to_close'.</c>
+<l>try</l>
+<l>    get_dict_tuple (ExampleInternals, 'window_handles_to_close', WindowHandlesToClose)</l>
+<l>catch (Exception)</l>
+<l>    WindowHandlesToClose := []</l>
+<l>endtry</l>
+<l>for I := 0 to |WindowHandlesToClose| - 1 by 1</l>
+<l>    dev_set_window (WindowHandlesToClose[I])</l>
+<l>    dev_close_window ()</l>
+<l>endfor</l>
+<l>set_dict_tuple (ExampleInternals, 'window_handles_to_close', [])</l>
+<c></c>
+<c>* Open image window if needed</c>
+<l>get_dict_param (ExampleInternals, 'keys', [], WindowHandleKeys)</l>
+<l>tuple_find (WindowHandleKeys, 'window_images', Index)</l>
+<l>get_dict_tuple (ExampleInternals, 'window_images_needed', WindowImagesNeeded)</l>
+<l>if (WindowImagesNeeded and Index == -1)</l>
+<c>    * Open new window for images</c>
+<l>dev_open_example_image_window (ExampleInternals)</l>
+<l>elseif (not WindowImagesNeeded and Index != -1)</l>
+<c>    * Window for images exists but is not needed -&gt; close it</c>
+<l>dev_close_example_image_window (ExampleInternals)</l>
+<l>endif</l>
+<c></c>
+<c>* Open legend window if needed</c>
+<l>get_dict_param (ExampleInternals, 'keys', [], WindowHandleKeys)</l>
+<l>tuple_find (WindowHandleKeys, 'window_legend', Index)</l>
+<l>get_dict_tuple (ExampleInternals, 'window_legend_needed', WindowLegendNeeded)</l>
+<l>if (WindowLegendNeeded and Index == -1)</l>
+<c>    * Open new window for legend</c>
+<l>dev_open_example_legend_window (ExampleInternals, 280)</l>
+<l>elseif (not WindowLegendNeeded and Index != -1)</l>
+<c>    * Window for legend exists but is not needed -&gt; close it</c>
+<l>dev_close_example_legend_window (ExampleInternals)</l>
+<l>endif</l>
+<c></c>
+<c>* Set the correct area (part) of the image window.</c>
+<l>try</l>
+<l>    get_dict_tuple (ExampleInternals, 'window_images', WindowHandleImages)</l>
+<l>    dev_set_window (WindowHandleImages)</l>
+<l>    dev_clear_window ()</l>
+<c>    * Set default window extends</c>
+<l>    dev_set_window_extents (360, 0, 800, 500)</l>
+<l>    dev_set_part (1, 1, -1, -1)</l>
+<l>catch (Exception)</l>
+<l>endtry</l>
+<c></c>
+<c>* Set the correct area (part) of the legend window.</c>
+<l>try</l>
+<l>    get_dict_tuple (ExampleInternals, 'window_legend', WindowHandleLegend)</l>
+<l>    dev_set_window (WindowHandleLegend)</l>
+<l>    dev_clear_window ()</l>
+<l>    dev_set_part (1, 1, -1, -1)</l>
+<l>catch (Exception)</l>
+<l>endtry</l>
+<l>get_dict_tuple (ExampleInternals, 'window_text', WindowHandleText)</l>
+<l>dev_set_window (WindowHandleText)</l>
+<l>dev_clear_window ()</l>
+<l>return ()</l>
+</body>
+<docu id="dev_display_example_reset_windows">
+<parameters>
+<parameter id="ExampleInternals">
+<default_type>integer</default_type>
+<mixed_type>false</mixed_type>
+<sem_type>dict</sem_type>
+<type_list>
+<item>integer</item>
+</type_list>
+</parameter>
+</parameters>
+</docu>
+</procedure>
+<procedure name="dev_open_example_legend_window">
+<interface>
+<ic>
+<par name="ExampleInternals" base_type="ctrl" dimension="0"/>
+<par name="WindowWidth" base_type="ctrl" dimension="0"/>
+</ic>
+</interface>
+<body>
+<c>* This procedure initializes the graphic windows that are used to display a legend.</c>
+<c></c>
+<l>get_dict_tuple (ExampleInternals, 'window_images_height', WindowImagesHeight)</l>
+<l>get_dict_tuple (ExampleInternals, 'window_images_width', WindowImagesWidth)</l>
+<l>get_dict_tuple (ExampleInternals, 'window_images_x', WindowImagesX)</l>
+<l>get_dict_tuple (ExampleInternals, 'window_images_y', WindowImagesY)</l>
+<l>dev_open_window (WindowImagesY, WindowImagesX + WindowImagesWidth + 5, WindowWidth, WindowImagesHeight, 'black', WindowHandleLegend)</l>
+<l>set_display_font (WindowHandleLegend, 14, 'mono', 'true', 'false')</l>
+<l>set_dict_tuple (ExampleInternals, 'window_legend', WindowHandleLegend)</l>
+<l>return ()</l>
+</body>
+<docu id="dev_open_example_legend_window">
+<parameters>
+<parameter id="ExampleInternals"/>
+<parameter id="WindowWidth"/>
+</parameters>
+</docu>
+</procedure>
+<procedure name="get_calibration_sample_indices">
+<interface>
+<ic>
+<par name="DLDataset" base_type="ctrl" dimension="0"/>
+<par name="NumCalibrationSamplesPerClass" base_type="ctrl" dimension="0"/>
+<par name="CalibrationSampleSet" base_type="ctrl" dimension="0"/>
+</ic>
+<oc>
+<par name="CalibrationSampleIndices" base_type="ctrl" dimension="0"/>
+</oc>
+</interface>
+<body>
+<l>get_dict_tuple (DLDataset, 'class_names', ClassNames)</l>
+<l>tuple_gen_const (|ClassNames|, NumCalibrationSamplesPerClass, MissingCalibrationSamplesPerClass)</l>
+<l>get_dict_tuple (DLDataset, 'samples', DLSamples)</l>
+<l>CalibrationSampleIndices := []</l>
+<l>for SampleIdx := 0 to |DLSamples| - 1 by 1</l>
+<l>    Sample := DLSamples[SampleIdx]</l>
+<l>    get_dict_tuple (Sample, 'split', Split)</l>
+<l>    if (Split != CalibrationSampleSet)</l>
+<l>        continue</l>
+<l>    endif</l>
+<l>    get_dict_tuple (Sample, 'image_label_id', LabelID)</l>
+<l>    if (MissingCalibrationSamplesPerClass[LabelID] &gt; 0)</l>
+<l>        CalibrationSampleIndices := [CalibrationSampleIndices,SampleIdx]</l>
+<l>        MissingCalibrationSamplesPerClass[LabelID] := MissingCalibrationSamplesPerClass[LabelID] - 1</l>
+<l>        if (sum(MissingCalibrationSamplesPerClass) == 0)</l>
+<l>            break</l>
+<l>        endif</l>
+<l>    endif</l>
+<l>endfor</l>
+<l>if (sum(MissingCalibrationSamplesPerClass) &gt; 0)</l>
+<l>    throw ('Could not get enough calibration samples for all classes from the dataset.')</l>
+<l>endif</l>
+<l>return ()</l>
+</body>
+<docu id="get_calibration_sample_indices">
+<parameters>
+<parameter id="CalibrationSampleIndices"/>
+<parameter id="CalibrationSampleSet"/>
+<parameter id="DLDataset"/>
+<parameter id="NumCalibrationSamplesPerClass"/>
+</parameters>
+</docu>
+</procedure>
+<procedure name="dev_display_screen_introduction">
+<interface>
+<ic>
+<par name="ExampleInternals" base_type="ctrl" dimension="0"/>
+</ic>
+</interface>
+<body>
+<c>* This procedure shows an overview on all example parts.</c>
+<c></c>
+<l>get_dict_tuple (ExampleInternals, 'show_example_screens', ShowExampleScreens)</l>
+<l>if (not ShowExampleScreens)</l>
+<l>    return ()</l>
+<l>endif</l>
+<c></c>
+<c>* Reset the open windows for a clean display.</c>
+<l>set_dict_tuple (ExampleInternals, 'window_images_needed', false)</l>
+<l>dev_display_example_reset_windows (ExampleInternals)</l>
+<c></c>
+<l>get_dict_tuple (ExampleInternals, 'window_text', WindowHandleText)</l>
+<l>dev_set_window (WindowHandleText)</l>
+<c></c>
+<c>* Display introduction text.</c>
+<l>Text := 'This example shows how to optimize a trained classification model with'</l>
+<l>Text[|Text|] := 'the operator \'optimize_dl_model_for_inference\' for different'</l>
+<l>Text[|Text|] := 'precision.'</l>
+<l>Text[|Text|] := ''</l>
+<l>Text[|Text|] := 'For this it uses the AI² plugin for TensorRT.'</l>
+<c></c>
+<l>dev_disp_text (Text, 'window', 'top', 'left', 'black', 'box', 'true')</l>
+<l>dev_disp_text ('Press Run (F5) to continue', 'window', 'bottom', 'right', 'black', 'box', 'true')</l>
+<c></c>
+<l>return ()</l>
+</body>
+<docu id="dev_display_screen_introduction">
+<parameters>
+<parameter id="ExampleInternals"/>
+</parameters>
+</docu>
+</procedure>
+<procedure name="dev_example_init">
+<interface>
+<ic>
+<par name="ShowExampleScreens" base_type="ctrl" dimension="0"/>
+<par name="UsePretrainedModel" base_type="ctrl" dimension="0"/>
+</ic>
+<oc>
+<par name="ExampleInternals" base_type="ctrl" dimension="0"/>
+</oc>
+</interface>
+<body>
+<c>* This procedure initializes the graphic windows that are used for explanations during the example.</c>
+<c></c>
+<c>* A dictionary that will be used/adapted by other example procedures.</c>
+<l>create_dict (ExampleInternals)</l>
+<l>set_dict_tuple (ExampleInternals, 'show_example_screens', ShowExampleScreens)</l>
+<l>set_dict_tuple (ExampleInternals, 'use_pretrained_model', UsePretrainedModel)</l>
+<l>if (not ShowExampleScreens)</l>
+<l>    return ()</l>
+<l>endif</l>
+<c></c>
+<l>dev_close_window ()</l>
+<l>WindowWidthText := 800</l>
+<l>WindowHeightText := 300</l>
+<l>WindowBGColor := 'gray'</l>
+<l>dev_open_window (0, 0, WindowWidthText, WindowHeightText, WindowBGColor, WindowHandleText)</l>
+<l>set_display_font (WindowHandleText, 16, 'mono', 'true', 'false')</l>
+<l>set_dict_tuple (ExampleInternals, 'window_text', WindowHandleText)</l>
+<l>set_dict_tuple (ExampleInternals, 'window_text_width', WindowWidthText)</l>
+<l>set_dict_tuple (ExampleInternals, 'window_text_height', WindowHeightText)</l>
+<c></c>
+<l>set_dict_tuple (ExampleInternals, 'window_images_needed', false)</l>
+<l>set_dict_tuple (ExampleInternals, 'window_legend_needed', false)</l>
+<c></c>
+<l>return ()</l>
+</body>
+<docu id="dev_example_init">
+<parameters>
+<parameter id="ExampleInternals"/>
+<parameter id="ShowExampleScreens">
+<default_type>integer</default_type>
+<default_value>0</default_value>
+<description lang="en_US">A boolean that is used to enable/disable explanation screens in this example</description>
+<multivalue>false</multivalue>
+<sem_type>string</sem_type>
+<type_list>
+<item>integer</item>
+</type_list>
+<value_max>1</value_max>
+<value_min>0</value_min>
+</parameter>
+<parameter id="UsePretrainedModel"/>
+</parameters>
+</docu>
+</procedure>
+<procedure name="check_data_availability">
+<interface>
+<ic>
+<par name="ExampleDataDir" base_type="ctrl" dimension="0"/>
+<par name="DLDatasetFileName" base_type="ctrl" dimension="0"/>
+<par name="TrainedModelFileName" base_type="ctrl" dimension="0"/>
+<par name="UsePretrainedModel" base_type="ctrl" dimension="0"/>
+</ic>
+</interface>
+<body>
+<c>* This procedure checks the availability of all files required to run the</c>
+<c>* evaluation example.</c>
+<c></c>
+<l>file_exists (ExampleDataDir, FileExists)</l>
+<l>if (not FileExists)</l>
+<l>    throw (ExampleDataDir + ' does not exist. Please run part 1 of the Deep Learning Classification example series.')</l>
+<l>endif</l>
+<c></c>
+<l>file_exists (DLDatasetFileName, FileExists)</l>
+<l>if (not FileExists)</l>
+<l>    throw (DLDatasetFileName + ' does not exist. Please run part 1 of the Deep Learning Classification example series.')</l>
+<l>endif</l>
+<c></c>
+<l>file_exists (TrainedModelFileName, FileExists)</l>
+<l>if (not FileExists)</l>
+<l>    if (UsePretrainedModel)</l>
+<l>        throw (TrainedModelFileName + ' does not exist. Please run the HALCON Deep Learning installer.')</l>
+<l>    else</l>
+<l>        throw (TrainedModelFileName + ' does not exist. Please run part 2 of the Deep Learning Classification example series.')</l>
+<l>    endif</l>
+<l>endif</l>
+<c></c>
+<l>return ()</l>
+</body>
+<docu id="check_data_availability">
+<parameters>
+<parameter id="DLDatasetFileName"/>
+<parameter id="ExampleDataDir"/>
+<parameter id="TrainedModelFileName"/>
+<parameter id="UsePretrainedModel"/>
+</parameters>
+</docu>
+</procedure>
+<procedure name="dev_close_example_image_window">
+<interface>
+<ic>
+<par name="ExampleInternals" base_type="ctrl" dimension="0"/>
+</ic>
+</interface>
+<body>
+<c>* This procedure closes the image window.</c>
+<c></c>
+<l>try</l>
+<l>    get_dict_tuple (ExampleInternals, 'window_images', WindowHandleImages)</l>
+<l>    dev_set_window (WindowHandleImages)</l>
+<l>    dev_close_window ()</l>
+<c>    * Delete key.</c>
+<l>    remove_dict_key (ExampleInternals, 'window_images')</l>
+<l>catch (Exception)</l>
+<l>endtry</l>
+<c></c>
+<l>return ()</l>
+</body>
+<docu id="dev_close_example_image_window">
+<parameters>
+<parameter id="ExampleInternals"/>
+</parameters>
+</docu>
+</procedure>
+<procedure name="dev_display_example_continue_message">
+<interface>
+<ic>
+<par name="ExampleInternals" base_type="ctrl" dimension="0"/>
+</ic>
+</interface>
+<body>
+<l>get_dict_tuple (ExampleInternals, 'show_example_screens', ShowExampleScreens)</l>
+<l>if (not ShowExampleScreens)</l>
+<l>    return ()</l>
+<l>endif</l>
+<c></c>
+<l>get_dict_tuple (ExampleInternals, 'window_text', WindowHandleText)</l>
+<l>dev_set_window (WindowHandleText)</l>
+<c></c>
+<l>dev_disp_text ('Press Run (F5) to continue', 'window', 'bottom', 'right', 'black', 'box', 'true')</l>
+<l>return ()</l>
+<l>return ()</l>
+</body>
+<docu id="dev_display_example_continue_message">
+<parameters>
+<parameter id="ExampleInternals"/>
+</parameters>
+</docu>
+</procedure>
+<procedure name="dev_close_example_legend_window">
+<interface>
+<ic>
+<par name="ExampleInternals" base_type="ctrl" dimension="0"/>
+</ic>
+</interface>
+<body>
+<c>* This procedure closes the legend window.</c>
+<c></c>
+<l>try</l>
+<l>    get_dict_tuple (ExampleInternals, 'window_legend', WindowHandleLegend)</l>
+<l>    dev_set_window (WindowHandleLegend)</l>
+<l>    dev_close_window ()</l>
+<c>    * Delete key.</c>
+<l>    remove_dict_key (ExampleInternals, 'window_legend')</l>
+<l>catch (Exception)</l>
+<l>endtry</l>
+<c></c>
+<l>return ()</l>
+</body>
+<docu id="dev_close_example_legend_window">
+<parameters>
+<parameter id="ExampleInternals"/>
+</parameters>
+</docu>
+</procedure>
+<procedure name="dev_display_screen_device">
+<interface>
+<ic>
+<par name="ExampleInternals" base_type="ctrl" dimension="0"/>
+<par name="DLDevice" base_type="ctrl" dimension="0"/>
+</ic>
+</interface>
+<body>
+<c>* This procedure displays information about the used device.</c>
+<c></c>
+<c>* Reset the open windows for a clean display.</c>
+<l>set_dict_tuple (ExampleInternals, 'window_images_needed', false)</l>
+<l>set_dict_tuple (ExampleInternals, 'window_legend_needed', false)</l>
+<l>dev_display_example_reset_windows (ExampleInternals)</l>
+<c></c>
+<c>* Display the explanatory text.</c>
+<l>get_dict_tuple (ExampleInternals, 'window_text', WindowHandleText)</l>
+<l>dev_set_window (WindowHandleText)</l>
+<c></c>
+<l>if (DLDevice != [])</l>
+<l>    get_dl_device_param (DLDevice, 'type', DLDeviceType)</l>
+<l>    get_dl_device_param (DLDevice, 'name', DLDeviceName)</l>
+<l>    get_dl_device_param (DLDevice, 'info', DLDeviceInfo)</l>
+<l>    get_dict_tuple (DLDeviceInfo, 'has_fast_fp16', DLDeviceHasFastFp16)</l>
+<l>    get_dict_tuple (DLDeviceInfo, 'has_fast_int8', DLDeviceHasFastInt8)</l>
+<l>    get_dict_tuple (DLDeviceInfo, 'has_tf32', DLDeviceHasTF32)</l>
+<l>endif</l>
+<c></c>
+<l>Text := 'This example needs the TensorRT AI² plugin and an NVIDIA GPU to be run.'</l>
+<l>Text[|Text|] := ''</l>
+<l>if (DLDevice == [])</l>
+<l>    Text[|Text|] := 'No GPU with necessary drivers and libraries has been found.'</l>
+<l>    Text[|Text|] := ''</l>
+<l>else</l>
+<l>    Text[|Text|] := 'This example will run the deep learning operators'</l>
+<l>    Text[|Text|] := 'on the following device:'</l>
+<l>    Text[|Text|] := 'Device type:      ' + DLDeviceType</l>
+<l>    Text[|Text|] := 'Device name:      ' + DLDeviceName</l>
+<l>    Text[|Text|] := 'Has fast float16: ' + DLDeviceHasFastFp16</l>
+<l>    Text[|Text|] := 'Has fast int8:    ' + DLDeviceHasFastInt8</l>
+<l>    Text[|Text|] := 'Has TF32:         ' + DLDeviceHasTF32</l>
+<l>endif</l>
+<c></c>
+<l>dev_disp_text (Text, 'window', 'top', 'left', 'black', 'box', 'true')</l>
+<l>dev_disp_text ('Press Run (F5) to continue', 'window', 'bottom', 'right', 'black', [], [])</l>
+<c></c>
+<l>return ()</l>
+</body>
+<docu id="dev_display_screen_device">
+<abstract lang="en_US">Display a message to mention on which device the deep learning operators will run.</abstract>
+<parameters>
+<parameter id="DLDevice"/>
+<parameter id="ExampleInternals"/>
+</parameters>
+</docu>
+</procedure>
+<procedure name="collect_results">
+<interface>
+<ic>
+<par name="ResultCollector" base_type="ctrl" dimension="0"/>
+<par name="DLModelHandle" base_type="ctrl" dimension="0"/>
+<par name="TimePerBatch" base_type="ctrl" dimension="0"/>
+<par name="EvaluationResult" base_type="ctrl" dimension="0"/>
+</ic>
+</interface>
+<body>
+<c>* This local procedure collects the results of benchmarking and evaluation in</c>
+<c>* the ResultCollector dictionary.</c>
+<c></c>
+<l>try</l>
+<l>    get_dict_tuple (ResultCollector, 'name', ResultNames)</l>
+<l>catch (Exception)</l>
+<l>    ResultNames := []</l>
+<l>endtry</l>
+<l>get_dl_model_param (DLModelHandle, 'device', Device)</l>
+<l>get_dl_device_param (Device, 'name', DeviceName)</l>
+<l>get_dl_device_param (Device, 'ai_accelerator_interface', InterfaceName)</l>
+<l>if (InterfaceName != 'none')</l>
+<l>    DeviceName := DeviceName + '/' + InterfaceName</l>
+<l>endif</l>
+<l>set_dict_tuple (ResultCollector, 'name', [ResultNames,DeviceName])</l>
+<c></c>
+<l>try</l>
+<l>    get_dict_tuple (ResultCollector, 'precision', ResultPrecisions)</l>
+<l>catch (Exception)</l>
+<l>    ResultPrecisions := []</l>
+<l>endtry</l>
+<l>get_dl_model_param (DLModelHandle, 'precision', Precision)</l>
+<l>set_dict_tuple (ResultCollector, 'precision', [ResultPrecisions,Precision])</l>
+<c></c>
+<l>try</l>
+<l>    get_dict_tuple (ResultCollector, 'time_per_batch', ResultTimes)</l>
+<l>catch (Exception)</l>
+<l>    ResultTimes := []</l>
+<l>endtry</l>
+<l>set_dict_tuple (ResultCollector, 'time_per_batch', [ResultTimes,TimePerBatch])</l>
+<c></c>
+<l>try</l>
+<l>    get_dict_tuple (ResultCollector, 'top1_error', ResultTop1Error)</l>
+<l>catch (Exception)</l>
+<l>    ResultTop1Error := []</l>
+<l>endtry</l>
+<l>get_dict_tuple (EvaluationResult, 'global', GlobalEval)</l>
+<l>get_dict_tuple (GlobalEval, 'top1_error', Top1Error)</l>
+<l>set_dict_tuple (ResultCollector, 'top1_error', [ResultTop1Error,Top1Error])</l>
+<l>return ()</l>
+</body>
+<docu id="collect_results">
+<parameters>
+<parameter id="DLModelHandle"/>
+<parameter id="EvaluationResult"/>
+<parameter id="ResultCollector"/>
+<parameter id="TimePerBatch"/>
+</parameters>
+</docu>
+</procedure>
+<procedure name="dev_display_example_show_results">
+<interface>
+<ic>
+<par name="ExampleInternals" base_type="ctrl" dimension="0"/>
+<par name="ResultCollector" base_type="ctrl" dimension="0"/>
+</ic>
+</interface>
+<body>
+<c>* This local procedure presents the results of the example in a table.</c>
+<c></c>
+<l>get_dict_tuple (ExampleInternals, 'show_example_screens', ShowExampleScreens)</l>
+<l>if (not ShowExampleScreens)</l>
+<l>    return ()</l>
+<l>endif</l>
+<c></c>
+<c>* Reset the open windows for a clean display.</c>
+<l>set_dict_tuple (ExampleInternals, 'window_images_needed', false)</l>
+<l>dev_display_example_reset_windows (ExampleInternals)</l>
+<c></c>
+<l>get_dict_tuple (ExampleInternals, 'window_text', WindowHandleText)</l>
+<l>dev_set_window (WindowHandleText)</l>
+<c></c>
+<c>* Set the column sizes for the table</c>
+<l>MaxNameLength := 40</l>
+<l>MaxTimeLength := 15</l>
+<l>MaxErrorLength := 11</l>
+<c></c>
+<l>get_dict_tuple (ResultCollector, 'name', Names)</l>
+<l>get_dict_tuple (ResultCollector, 'precision', Precisions)</l>
+<l>get_dict_tuple (ResultCollector, 'time_per_batch', TimesPerBatch)</l>
+<l>get_dict_tuple (ResultCollector, 'top1_error', Top1Errors)</l>
+<c></c>
+<l>FullWidth := 2 + MaxNameLength + 3 + MaxTimeLength + 3 + MaxErrorLength + 2</l>
+<l>Text := 'This table presents the results obtained with different precisions.'</l>
+<l>Text[|Text|] := 'Note that they strongly depend on the used GPU.'</l>
+<l>Text[|Text|] := ''</l>
+<l>Text[|Text|] := '╔' + sum(gen_tuple_const(MaxNameLength + 2,'═')) + '╤' + sum(gen_tuple_const(MaxTimeLength + 2,'═')) + '╤' + sum(gen_tuple_const(MaxErrorLength + 2,'═')) + '╗'</l>
+<l>CaptionName := 'DeviceName [precision]'</l>
+<l>CaptionTime := 'Time per Batch'</l>
+<l>CaptionError := 'Top1 Error'</l>
+<l>Text[|Text|] := '║ ' + CaptionName + sum(gen_tuple_const(MaxNameLength - strlen(CaptionName),' '))</l>
+<l>Text[|Text| - 1] := Text[|Text| - 1] + ' │ ' + sum(gen_tuple_const(MaxTimeLength - strlen(CaptionTime),' ')) + CaptionTime</l>
+<l>Text[|Text| - 1] := Text[|Text| - 1] + ' │ ' + sum(gen_tuple_const(MaxErrorLength - strlen(CaptionError),' ')) + CaptionError</l>
+<l>Text[|Text| - 1] := Text[|Text| - 1] + ' ║'</l>
+<l>Text[|Text|] := '╠' + sum(gen_tuple_const(MaxNameLength + 2,'═')) + '╪' + sum(gen_tuple_const(MaxTimeLength + 2,'═')) + '╪' + sum(gen_tuple_const(MaxErrorLength + 2,'═')) + '╣'</l>
+<c></c>
+<l>for Index := 0 to |Names| - 1 by 1</l>
+<l>    Text[|Text|] := '║ '</l>
+<l>    Name := Names[Index]</l>
+<l>    Precision := Precisions[Index]</l>
+<l>    if (strlen(Name) + strlen(Precision) + 3 &gt; MaxNameLength)</l>
+<l>        Name := Name{0:MaxNameLength - (strlen(Precision) + 7)} + '...'</l>
+<l>    endif</l>
+<l>    Name := Name + ' [' + Precision + ']'</l>
+<c>    * right pad with spaces</c>
+<l>    if (strlen(Name) &lt; MaxNameLength)</l>
+<l>        Name := Name + sum(gen_tuple_const(MaxNameLength - strlen(Name),' '))</l>
+<l>    endif</l>
+<l>    Text[|Text| - 1] := Text[|Text| - 1] + Name + ' │ '</l>
+<c></c>
+<l>    TimePerBatch := TimesPerBatch[Index] * 1000.0</l>
+<l>    TimePerBatch := TimePerBatch$'.3f' + ' ms'</l>
+<c>    * left pad with spaces</c>
+<l>    if (strlen(TimePerBatch) &lt; MaxTimeLength)</l>
+<l>        TimePerBatch := sum(gen_tuple_const(MaxTimeLength - strlen(TimePerBatch),' ')) + TimePerBatch</l>
+<l>    endif</l>
+<l>    Text[|Text| - 1] := Text[|Text| - 1] + TimePerBatch + ' │ '</l>
+<c></c>
+<l>    Top1Error := Top1Errors[Index] * 100.0</l>
+<l>    Top1Error := Top1Error$'.2f' + ' %'</l>
+<c>    * left pad with spaces</c>
+<l>    if (strlen(Top1Error) &lt; MaxErrorLength)</l>
+<l>        Top1Error := sum(gen_tuple_const(MaxErrorLength - strlen(Top1Error),' ')) + Top1Error</l>
+<l>    endif</l>
+<l>    Text[|Text| - 1] := Text[|Text| - 1] + Top1Error + ' ║'</l>
+<l>endfor</l>
+<l>Text[|Text|] := '╚' + sum(gen_tuple_const(MaxNameLength + 2,'═')) + '╧' + sum(gen_tuple_const(MaxTimeLength + 2,'═')) + '╧' + sum(gen_tuple_const(MaxErrorLength + 2,'═')) + '╝'</l>
+<c></c>
+<l>dev_disp_text (Text, 'window', 'top', 'left', 'black', [], [])</l>
+<l>dev_disp_text ('Press Run (F5) to continue', 'window', 'bottom', 'right', 'black', 'box', 'true')</l>
+<l>return ()</l>
+</body>
+<docu id="dev_display_example_show_results">
+<parameters>
+<parameter id="ExampleInternals"/>
+<parameter id="ResultCollector"/>
+</parameters>
+</docu>
+</procedure>
+<procedure name="dev_display_example_show_current_stage">
+<interface>
+<ic>
+<par name="ExampleInternals" base_type="ctrl" dimension="0"/>
+<par name="Precision" base_type="ctrl" dimension="0"/>
+</ic>
+</interface>
+<body>
+<c>* This local procedure explains the current stage of the example</c>
+<c></c>
+<l>get_dict_tuple (ExampleInternals, 'show_example_screens', ShowExampleScreens)</l>
+<l>if (not ShowExampleScreens)</l>
+<l>    return ()</l>
+<l>endif</l>
+<c></c>
+<c>* Reset the open windows for a clean display.</c>
+<l>set_dict_tuple (ExampleInternals, 'window_images_needed', false)</l>
+<l>dev_display_example_reset_windows (ExampleInternals)</l>
+<c></c>
+<l>get_dict_tuple (ExampleInternals, 'window_text', WindowHandleText)</l>
+<l>dev_set_window (WindowHandleText)</l>
+<c></c>
+<l>PrecisionString := Precision</l>
+<l>if (PrecisionString == 'float32_fallback')</l>
+<l>    PrecisionString := 'float32'</l>
+<l>endif</l>
+<c></c>
+<l>Text := 'Evaluating and benchmarking with \'' + PrecisionString + '\' precision.'</l>
+<l>Text[|Text|] := ''</l>
+<l>if (Precision == 'int8' or Precision == 'float16')</l>
+<l>    Text[|Text|] := 'TensorRT optimizes the execution of the network by performing various'</l>
+<l>    Text[|Text|] := 'benchmarks. For good results it is necessary that the used GPU is not'</l>
+<l>    Text[|Text|] := 'used by other tasks during this process. Other tasks should also not'</l>
+<l>    Text[|Text|] := 'block memory resources on the used GPU.'</l>
+<l>    Text[|Text|] := ''</l>
+<l>endif</l>
+<l>if (Precision == 'float32_fallback')</l>
+<l>    Text[|Text|] := 'This device has no hardware support for \'float16\'. \'float32\' is used'</l>
+<l>    Text[|Text|] := 'instead. For \'float32\' precision no calibration samples are needed since it'</l>
+<l>    Text[|Text|] := 'is a \'cast_precision\'.'</l>
+<l>    Text[|Text|] := ''</l>
+<l>endif</l>
+<l>if (Precision == 'float16')</l>
+<l>    Text[|Text|] := 'For \'float16\' precision no calibration samples are needed since it is a'</l>
+<l>    Text[|Text|] := '\'cast_precision\'. Not all GPUs support float16 operations and may'</l>
+<l>    Text[|Text|] := 'fall back to \'float32\' operations.'</l>
+<l>    Text[|Text|] := ''</l>
+<l>endif</l>
+<l>if (Precision == 'int8')</l>
+<l>    Text[|Text|] := 'For \'int8\' precision \'optimize_dl_model_for_inference\' needs some'</l>
+<l>    Text[|Text|] := 'samples to calibrate the network. These samples should be representative'</l>
+<l>    Text[|Text|] := 'for the target application. We recommend to provide 10-20 samples per'</l>
+<l>    Text[|Text|] := 'class, which suffices to obtain good results for most applications.'</l>
+<l>    Text[|Text|] := ''</l>
+<c></c>
+<l>endif</l>
+<c></c>
+<l>Text[|Text|] := 'This process might take some time.'</l>
+<c></c>
+<l>dev_disp_text (Text, 'window', 'top', 'left', 'black', 'box', 'true')</l>
+<c></c>
+<l>return ()</l>
+</body>
+<docu id="dev_display_example_show_current_stage">
+<parameters>
+<parameter id="ExampleInternals"/>
+<parameter id="Precision"/>
+</parameters>
+</docu>
+</procedure>
+</hdevelop>

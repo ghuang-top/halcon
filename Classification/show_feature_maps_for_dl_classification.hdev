@@ -1,0 +1,287 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<hdevelop file_version="1.2" halcon_version="22.11.2.0">
+<procedure name="main">
+<interface/>
+<body>
+<c>* 此示例演示了如何获取指定模型层的特征图以及推断图像。</c>
+<c>* </c>
+<c>* 首先，我们要选择要提取特征图的层。</c>
+<c>* 设置层将截断模型，当我们应用它时，我们获得特征图，</c>
+<c>* 我们打算查看它。</c>
+<c>* 然后，显示该层的几个特征图。</c>
+<c>* 在这个示例中，我们分析了三幅图像。对于这些图像，我们检索出了输出的</c>
+<c>* 两个选择层，并显示每个层的三个特征图。</c>
+<c>* </c>
+<c>* 此功能的应用领域：</c>
+<c>* 检查特征图对于更好地理解您自己训练的网络可能很有用。</c>
+<c></c>
+<c>* 警告：选择层后，网络将被截断！此操作无法逆转。因此，请不要覆盖您未修改的网络。</c>
+<c>* </c>
+<l>dev_close_window ()</l>
+<l>dev_update_off ()</l>
+<c>* </c>
+<c>* 在此示例中，我们从药丸数据集推断图像。</c>
+<l>get_system ('example_dir', ExampleDir)</l>
+<l>ImageDir := ExampleDir + '/images/pill'</l>
+<c>* </c>
+<c>* 使用HALCON提供的预训练模型和相应的预处理参数。</c>
+<c>* 如果要使用其他模型，请修改这些行。</c>
+<l>PreprocessParamFileName := 'classify_pill_defects_preprocess_param.hdict'</l>
+<l>RetrainedModelFileName := 'classify_pill_defects.hdl'</l>
+<c>* </c>
+<c>* 推断可以在任何深度学习设备上完成。</c>
+<c>* 请参阅安装指南中的相应系统要求。</c>
+<c>* 如果可用，尝试在GPU上运行示例，这是query_available_dl_devices返回的第一个设备。</c>
+<l>query_available_dl_devices (['runtime', 'runtime'], ['gpu', 'cpu'], DLDeviceHandles)</l>
+<l>if (|DLDeviceHandles| == 0)</l>
+<l>    throw ('未找到支持的设备以继续此示例。')</l>
+<l>endif</l>
+<l>DLDevice := DLDeviceHandles[0]</l>
+<c>* </c>
+<c>* 读取模型。</c>
+<l>read_dl_model (RetrainedModelFileName, DLModelHandle)</l>
+<c>* </c>
+<c>* 获取网络及其架构的概述。</c>
+<c>* 为此，检索“summary”，其中为每个层列出其名称和类型，</c>
+<c>* 其他内容：</c>
+<c>* ID、NAME、TYPE、OUTPUT_SHAPE、CONNECTED_NODES。</c>
+<l>get_dl_model_param (DLModelHandle, 'summary', NetworkSummary)</l>
+<c>* </c>
+<c>* 对于确定的层，选择深度以及要显示的特征图。</c>
+<c>* 在此示例中，我们创建一个选择层的元组，稍后将对其进行迭代。</c>
+<l>ChosenLayers := ['conv1', 'conv10']</l>
+<c>* </c>
+<c>* 获取所选层的层类型。</c>
+<c>* 提示：这仅用于可视化目的。</c>
+<l>get_layer_types_from_summary (ChosenLayers, NetworkSummary, LayerTypes)</l>
+<c>* </c>
+<c>* 选择要显示的所选层的深度。</c>
+<c>* 在网络“summary”中，您会找到每个层的各个深度和</c>
+<c>* 因此可选择的深度。有关更多信息，请参阅</c>
+<c>* get_dl_model_param运算符的文档。</c>
+<c>* 我们随意选择了第一层和第二层的特征图。</c>
+<l>SelectedFeatureMapDepths := dict{[ChosenLayers[0]]: [10, 15, 64], [ChosenLayers[1]]: [1, 2, 3]}</l>
+<c>* </c>
+<c>* 对于此示例，我们选择三张人参类药丸的图片。</c>
+<l>ImageFiles := ImageDir + '/ginseng/' + ['good/pill_ginseng_good_001', 'contamination/pill_ginseng_contamination_004', 'crack/pill_ginseng_crack_001']</l>
+<c>* 获取用于预处理的参数。</c>
+<l>read_dict (PreprocessParamFileName, [], [], DLPreprocessParam)</l>
+<c>* </c>
+<l>WindowDict := dict{}</l>
+<l>for LayerIndex := 0 to |ChosenLayers| - 1 by 1</l>
+<c>    * </c>
+<c>    * 读取模型。</c>
+<c>    * 当推断结果为所选层的特征图时，网络被修改。</c>
+<c>    * 因此，我们必须为</c>
+<c>    * 每个新层读取它，</c>
+<c>    * 我们要获取其特征图。</c>
+<l>    read_dl_model (RetrainedModelFileName, DLModelHandle)</l>
+<l>    set_dl_model_param (DLModelHandle, 'batch_size', 1)</l>
+<l>    set_dl_model_param (DLModelHandle, 'device', DLDevice)</l>
+<c>    * </c>
+<c>    * 设置要显示其特征图的所选层。</c>
+<c>    * 注意：</c>
+<c>    * 设置'extract_feature_maps'会修改模型：</c>
+<c>    * 所选择层后的层将被截断！</c>
+<c>    * 请注意，此功能仅适用于“type”=“classification”的模型。</c>
+<l>    set_dl_model_param (DLModelHandle, 'extract_feature_maps', ChosenLayers[LayerIndex])</l>
+<c>    * </c>
+<c>    * 检查三个图像及其相应的特征图。</c>
+<l>    for ImageIndex := 0 to |ImageFiles| - 1 by 1</l>
+<l>        read_image (Image, ImageFiles[ImageIndex])</l>
+<l>        gen_dl_samples_from_images (Image, DLSample)</l>
+<l>        preprocess_dl_samples (DLSample, DLPreprocessParam)</l>
+<c>        * 在DLSample上应用DL模型。</c>
+<l>        apply_dl_model (DLModelHandle, DLSample, [], DLResult)</l>
+<c>        * 将整个层输出作为对象。</c>
+<l>        SampleFeatureMaps := DLResult.[ChosenLayers[LayerIndex]]</l>
+<c>        * </c>
+<c>        * 从所选层获取特征图。</c>
+<l>        get_feature_maps (SampleFeatureMaps, SelectedFeatureMapDepths, LayerIndex, SelectedFeatureMaps)</l>
+<c>        * 显示所选层的输入图像和一些特征图。</c>
+<l>        display_feature_maps (Image, ChosenLayers, LayerIndex, ImageIndex, LayerTypes, SelectedFeatureMaps, SelectedFeatureMapDepths, WindowDict)</l>
+<l>        stop ()</l>
+<l>        dev_close_window_dict (WindowDict)</l>
+<l>    endfor</l>
+<l>endfor</l>
+<c></c>
+</body>
+<docu id="main">
+<parameters/>
+</docu>
+</procedure>
+<procedure name="display_feature_maps">
+<interface>
+<io>
+<par name="Image" base_type="iconic" dimension="0"/>
+</io>
+<ic>
+<par name="ChosenLayers" base_type="ctrl" dimension="0"/>
+<par name="LayerIndex" base_type="ctrl" dimension="0"/>
+<par name="ImageIndex" base_type="ctrl" dimension="0"/>
+<par name="LayerTypes" base_type="ctrl" dimension="0"/>
+<par name="SelectedFeatureMaps" base_type="ctrl" dimension="0"/>
+<par name="SelectedFeatureMapDepths" base_type="ctrl" dimension="0"/>
+<par name="WindowDict" base_type="ctrl" dimension="0"/>
+</ic>
+</interface>
+<body>
+<c>* This procedure displays the inferred image and the selected</c>
+<c>* feature maps.</c>
+<c></c>
+<c>* For visualization purpose set class names.</c>
+<l>ClassNames := ['good', 'crack', 'contamination']</l>
+<c></c>
+<c>* Show original image.</c>
+<l>dev_open_window (0, 0, 500, 500, 'black', WindowHandle1)</l>
+<l>set_dict_tuple (WindowDict, 'original_image', WindowHandle1)</l>
+<l>get_window_extents (WindowHandle1, Row, Column, Width, Height)</l>
+<l>dev_display (Image)</l>
+<l>Text := 'Original image'</l>
+<l>Text[|Text|] := ' '</l>
+<l>Text[|Text|] := 'Class: ' + ClassNames[ImageIndex]</l>
+<l>dev_disp_text (Text, 'window', 'top', 'left', ['red', 'black', 'black'], [], [])</l>
+<c></c>
+<c>* Get the depths of the selected layer.</c>
+<l>get_dict_param (SelectedFeatureMapDepths, 'keys', [], SelectedChannels)</l>
+<l>get_dict_tuple (SelectedFeatureMapDepths, SelectedChannels[LayerIndex], SelectedDepthsOfLayer)</l>
+<c></c>
+<c>* Show feature maps.</c>
+<l>dev_open_window (0, Width + 5, Width, Height, 'black', WindowHandle2)</l>
+<l>set_dict_tuple (WindowDict, 'feature_map_1', WindowHandle2)</l>
+<c>* Get image objects from dict.</c>
+<l>get_dict_object (SelectedFeatureMapsObj, SelectedFeatureMaps, ChosenLayers[LayerIndex])</l>
+<c>* Get feature map or selected layer.</c>
+<l>select_obj (SelectedFeatureMapsObj, FeatureMap1, 1)</l>
+<l>dev_display (FeatureMap1)</l>
+<l>Text := 'Feature Map '</l>
+<l>Text[|Text|] := ' '</l>
+<l>Text[|Text|] := 'Selected layer: \'' + ChosenLayers[LayerIndex] + '\' '</l>
+<l>Text[|Text|] := 'Type of layer: \'' + LayerTypes[LayerIndex] + '\' '</l>
+<l>Text[|Text|] := 'Selected depth: ' + SelectedDepthsOfLayer[0]</l>
+<c></c>
+<l>tuple_gen_const (|Text|, 'white', LineColors)</l>
+<l>LineColors[0] := 'red'</l>
+<l>LineColors[1:6] := 'black'</l>
+<l>dev_disp_text (Text, 'window', 'top', 'left', LineColors, [], [])</l>
+<c></c>
+<l>dev_open_window (Height + 55, 0, Width, Height, 'black', WindowHandle3)</l>
+<l>set_dict_tuple (WindowDict, 'feature_map_2', WindowHandle3)</l>
+<c>* Get feature map or selected layer.</c>
+<l>select_obj (SelectedFeatureMapsObj, FeatureMap2, 2)</l>
+<l>dev_display (FeatureMap2)</l>
+<l>Text := 'Feature Map '</l>
+<l>Text[|Text|] := ' '</l>
+<l>Text[|Text|] := 'Selected layer: \'' + ChosenLayers[LayerIndex] + '\' '</l>
+<l>Text[|Text|] := 'Type of layer: \'' + LayerTypes[LayerIndex] + '\' '</l>
+<l>Text[|Text|] := 'Selected depth: ' + SelectedDepthsOfLayer[1]</l>
+<l>dev_disp_text (Text, 'window', 'top', 'left', LineColors, [], [])</l>
+<c></c>
+<l>dev_open_window (Height + 55, Width + 5, Width, Height, 'black', WindowHandle4)</l>
+<l>set_dict_tuple (WindowDict, 'feature_map_3', WindowHandle4)</l>
+<c>* Get feature map or selected layer.</c>
+<l>select_obj (SelectedFeatureMapsObj, FeatureMap3, 3)</l>
+<l>dev_display (FeatureMap3)</l>
+<l>Text := 'Feature Map '</l>
+<l>Text[|Text|] := ' '</l>
+<l>Text[|Text|] := 'Selected layer: \'' + ChosenLayers[LayerIndex] + '\' '</l>
+<l>Text[|Text|] := 'Type of layer: \'' + LayerTypes[LayerIndex] + '\' '</l>
+<l>Text[|Text|] := 'Selected depth: ' + SelectedDepthsOfLayer[2]</l>
+<l>dev_disp_text (Text, 'window', 'top', 'left', LineColors, [], [])</l>
+<l>if (LayerIndex == 1 and ImageIndex == 2)</l>
+<l>    dev_disp_text ('End of the example', 'window', 'bottom', 'right', 'black', [], [])</l>
+<l>else</l>
+<l>    dev_disp_text ('Press F5 to continue', 'window', 'bottom', 'right', 'black', [], [])</l>
+<l>endif</l>
+<l>return ()</l>
+</body>
+<docu id="display_feature_maps">
+<short lang="en_US">Display the inferred image and the selected feature maps.</short>
+<parameters>
+<parameter id="ChosenLayers"/>
+<parameter id="Image"/>
+<parameter id="ImageIndex"/>
+<parameter id="LayerIndex"/>
+<parameter id="LayerTypes"/>
+<parameter id="SelectedFeatureMapDepths"/>
+<parameter id="SelectedFeatureMaps"/>
+<parameter id="WindowDict"/>
+</parameters>
+</docu>
+</procedure>
+<procedure name="get_feature_maps">
+<interface>
+<io>
+<par name="SampleFeatureMaps" base_type="iconic" dimension="0"/>
+</io>
+<ic>
+<par name="SelectedFeatureMapDepths" base_type="ctrl" dimension="0"/>
+<par name="LayerIndex" base_type="ctrl" dimension="0"/>
+</ic>
+<oc>
+<par name="SelectedFeatureMaps" base_type="ctrl" dimension="0"/>
+</oc>
+</interface>
+<body>
+<c>* This procedure gets the single feature maps of the selected layer and</c>
+<c>* saves them in a dictionary.</c>
+<c></c>
+<l>count_channels (SampleFeatureMaps, NumChannels)</l>
+<l>get_dict_param (SelectedFeatureMapDepths, 'keys', [], SelectedChannels)</l>
+<c></c>
+<l>create_dict (SelectedFeatureMaps)</l>
+<l>get_dict_tuple (SelectedFeatureMapDepths, SelectedChannels[LayerIndex], SelectedDepthsOfLayer)</l>
+<l>gen_empty_obj (SingleFeatureMaps)</l>
+<l>for Idx := 0 to |SelectedDepthsOfLayer| - 1 by 1</l>
+<l>    if (SelectedDepthsOfLayer[Idx] &gt; NumChannels)</l>
+<l>        throw ('Your set depth is too large! Please have a look at the channel depth of the chosen layer.')</l>
+<l>    endif</l>
+<c>    * Get the feature maps.</c>
+<l>    access_channel (SampleFeatureMaps, SingleFeatureMap, SelectedDepthsOfLayer[Idx])</l>
+<l>    concat_obj (SingleFeatureMaps, SingleFeatureMap, SingleFeatureMaps)</l>
+<l>endfor</l>
+<l>set_dict_object (SingleFeatureMaps, SelectedFeatureMaps, SelectedChannels[LayerIndex])</l>
+<l>return ()</l>
+</body>
+<docu id="get_feature_maps">
+<short lang="en_US">Get the single feature maps of a selected model layer.</short>
+<parameters>
+<parameter id="LayerIndex"/>
+<parameter id="SampleFeatureMaps"/>
+<parameter id="SelectedFeatureMapDepths"/>
+<parameter id="SelectedFeatureMaps"/>
+</parameters>
+</docu>
+</procedure>
+<procedure name="get_layer_types_from_summary">
+<interface>
+<ic>
+<par name="ChosenLayers" base_type="ctrl" dimension="0"/>
+<par name="NetworkSummary" base_type="ctrl" dimension="0"/>
+</ic>
+<oc>
+<par name="LayerTypes" base_type="ctrl" dimension="0"/>
+</oc>
+</interface>
+<body>
+<c>* This procedure gets the type specification for the selected model layers.</c>
+<c></c>
+<l>LayerTypes := []</l>
+<l>for LayerIndex := 0 to |ChosenLayers| - 1 by 1</l>
+<l>    tuple_regexp_select (NetworkSummary, ChosenLayers[LayerIndex] + ';', SelectedLayerInfo)</l>
+<l>    RegExpression := ChosenLayers[LayerIndex] + ';[ ]+([a-zA-Z0-9-]+)'</l>
+<l>    tuple_regexp_match (SelectedLayerInfo, RegExpression, LayerType)</l>
+<l>    LayerTypes := [LayerTypes,LayerType]</l>
+<l>endfor</l>
+<l>return ()</l>
+</body>
+<docu id="get_layer_types_from_summary">
+<short lang="en_US">Get the type for a selected model layer.</short>
+<parameters>
+<parameter id="ChosenLayers"/>
+<parameter id="LayerTypes"/>
+<parameter id="NetworkSummary"/>
+</parameters>
+</docu>
+</procedure>
+</hdevelop>

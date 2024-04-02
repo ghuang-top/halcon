@@ -1,0 +1,305 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<hdevelop file_version="1.2" halcon_version="22.11.2.0">
+<procedure name="main">
+<interface/>
+<body>
+<c>* </c>
+<c>* 深度学习异常检测示例。</c>
+<c>* </c>
+<c>* 此示例演示了基于深度学习的异常检测的一般工作流程。</c>
+<c>* </c>
+<c>* 工作流程通常包括以下步骤：</c>
+<c>* 1. 数据集预处理。</c>
+<c>* 2. 在无异常（'ok'）图像上训练模型。</c>
+<c>* 3. 阈值估计和训练模型的评估。</c>
+<c>* 4. 对新图像进行推断。</c>
+<c>* </c>
+<l>dev_update_off ()</l>
+<l>dev_close_window ()</l>
+<l>set_system ('seed_rand', 73)</l>
+<c>* </c>
+<c>* </c>
+<c>* ***   0.) 设置输入/输出路径   ***</c>
+<c>* </c>
+<c>* 设置数据路径。</c>
+<l>get_image_dir (HalconImages)</l>
+<c>* </c>
+<c>* 基本目录ImageDir必须包含图像的子目录。</c>
+<c>* 其中一个子目录必须命名为'good'或'ok'。</c>
+<c>* 用于训练的仅是此子目录中的图像。 名称不是'good'或'ok'的子目录中的图像被视为异常。</c>
+<c>* 它们可用于对训练模型进行定性评估。</c>
+<c>* </c>
+<c>* 注意：只要您的无异常图像位于名为'good'或'ok'的子目录中，您就可以立即在自己的数据上训练异常检测模型。</c>
+<l>ImageDir := HalconImages + '/bottles'</l>
+<l>ImageSubDirs := ['good', 'broken_large', 'broken_small', 'contamination']</l>
+<c>* </c>
+<c>* 如果存在地面真实异常区域，则指定包含它们的目录的AnomalyLabelsDir。</c>
+<c>* 请注意，训练不需要地面真实注释。</c>
+<c>* 如果没有可用，则将AnomalyLabelsDir设置为[]。</c>
+<l>AnomalyLabelsDir := HalconImages + '/labels/bottles'</l>
+<c>* </c>
+<c>* 存储预处理数据的目录。</c>
+<l>OutputDir := './anomaly_bottle_data'</l>
+<c>* </c>
+<c>* 如果ExampleSpecificPreprocessing设置为true，则数据将通过专门为当前数据集设计的过程进行预处理。</c>
+<l>ExampleSpecificPreprocessing := true</l>
+<c>* </c>
+<c>* 定义输入图像大小。应选择足够大的值，以使小缺陷仍然可见。</c>
+<c>* 有关可能的限制，请参阅read_dl_model的文档，具体取决于网络类型。</c>
+<l>ImageWidth := 320</l>
+<l>ImageHeight := 320</l>
+<c>* </c>
+<c>* 设置复杂度，它描述了模型处理复杂应用的能力。较高的值可以提高性能，但会增加训练模型所需的时间。</c>
+<l>Complexity := 15</l>
+<c>* </c>
+<c>* </c>
+<c>* ***   1.) 准备   ***</c>
+<c>* </c>
+<c>* 读取并预处理异常检测数据集。</c>
+<c>* 在一般预处理之后，定义一个额外的预处理过程可能是有益的，</c>
+<c>* 该过程适应训练图像的域。该过程对于每个数据集都是独特的，</c>
+<c>* 可显著提高生成模型的性能。</c>
+<c>* </c>
+<c>* 加载并拆分数据集。</c>
+<l>GenParamDataset := dict{image_sub_dirs: ImageSubDirs}</l>
+<l>read_dl_dataset_anomaly (ImageDir, AnomalyLabelsDir, [], [], GenParamDataset, DLDataset)</l>
+<c>* </c>
+<c>* 注意：确保每个拆分至少包含一个'ok'图像。</c>
+<c>* 对于仅包含少量图像的数据集，可能需要增加验证图像的比例。</c>
+<l>split_dl_dataset (DLDataset, 50, 10, [])</l>
+<c>* </c>
+<c>* 加载异常检测模型并设置关键参数。</c>
+<c>* 有关文档，请参阅set_dl_model_param ()和get_dl_model_param ()。</c>
+<l>read_dl_model ('initial_dl_anomaly_medium.hdl', DLModelHandle)</l>
+<l>set_dl_model_param (DLModelHandle, 'image_width', ImageWidth)</l>
+<l>set_dl_model_param (DLModelHandle, 'image_height', ImageHeight)</l>
+<l>set_dl_model_param (DLModelHandle, 'complexity', Complexity)</l>
+<c>* 在此示例中，异常检测模型在CPU上进行训练。</c>
+<l>query_available_dl_devices (['runtime', 'id'], ['cpu', 0], DLDevice)</l>
+<l>set_dl_model_param (DLModelHandle, 'device', DLDevice)</l>
+<c>* </c>
+<c>* 设置预处理参数并对数据集进行预处理。</c>
+<l>create_dl_preprocess_param_from_model (DLModelHandle, 'constant_values', 'full_domain', [], [], [], DLPreprocessParam)</l>
+<l>PreprocessSettings := dict{overwrite_files: 'true'}</l>
+<l>preprocess_dl_dataset (DLDataset, OutputDir, DLPreprocessParam, PreprocessSettings, DLDatasetFileName)</l>
+<c>* </c>
+<c>* 在此示例中，我们除了一般预处理外，还执行了特定的预处理。</c>
+<c>* 请注意：如果可以限制缺陷可能发生的图像区域（ROI），我们建议将这些区域定义为域。在这里，通过preprocess_dl_sample_bottle过程实现。</c>
+<c>* 对于您自己的应用程序，您必须调整此过程以适应您的数据。</c>
+<l>if (ExampleSpecificPreprocessing)</l>
+<l>    read_dl_samples (DLDataset, [0:|DLDataset.samples| - 1], DLSampleBatch)</l>
+<l>    preprocess_dl_samples_bottle (DLSampleBatch)</l>
+<l>    write_dl_samples (DLDataset, [0:|DLDataset.samples| - 1], DLSampleBatch, [], [])</l>
+<l>endif</l>
+<c>* </c>
+<c>* 可视化检查十个随机选择的预处理后的DLSamples。</c>
+<l>WindowDict := dict{}</l>
+<l>for Index := 0 to 9 by 1</l>
+<l>    SampleIndex := int(rand(1) * |DLDataset.samples|)</l>
+<l>    read_dl_samples (DLDataset, SampleIndex, DLSample)</l>
+<l>    dev_display_dl_data (DLSample, [], DLDataset, 'anomaly_ground_truth', [], WindowDict)</l>
+<l>    dev_disp_text ('Press Run (F5) to continue', 'window', 'bottom', 'right', 'black', [], [])</l>
+<c>    * </c>
+<l>    dev_set_window (WindowDict.anomaly_ground_truth[0])</l>
+<l>    dev_disp_text ('Preprocessed image', 'window', 'top', 'left', 'black', [], [])</l>
+<c>    * </c>
+<l>    stop ()</l>
+<l>endfor</l>
+<l>dev_close_window_dict (WindowDict)</l>
+<c>* </c>
+<l>stop ()</l>
+<c>* </c>
+<c>* </c>
+<c>* ***   2.) 训练   ***</c>
+<c>* </c>
+<c>* 创建训练参数。</c>
+<c>* </c>
+<c>* 如果EnableDisplay设置为true，则显示训练进度。</c>
+<l>EnableDisplay := true</l>
+<c>* </c>
+<c>* 设置训练错误的阈值和最大训练周期数。</c>
+<c>* 如果训练错误低于此阈值，则训练完成。否则，训练会继续，直到达到最大周期数。</c>
+<l>TrainParamAnomaly := dict{error_threshold: 0.001}</l>
+<l>MaxNumEpochs := 30</l>
+<c>* </c>
+<c>* 设置域比率，它控制用于训练的每个图像的分数。通过设置较大的值，可以改善训练模型的性能。</c>
+<c>* 但是，这会增加训练时间。</c>
+<l>TrainParamAnomaly.domain_ratio := 0.25</l>
+<c>* </c>
+<c>* 正则化噪声可帮助使训练更加健壮。</c>
+<c>* 如果训练失败，请尝试设置更高的值。</c>
+<l>TrainParamAnomaly.regularization_noise := 0.01</l>
+<c>* </c>
+<l>create_dl_train_param (DLModelHandle, MaxNumEpochs, [], EnableDisplay, 73, 'anomaly', TrainParamAnomaly, TrainParam)</l>
+<c>* </c>
+<c>* 训练以及train_dl_model_anomaly_dataset ()的调用</c>
+<c>* 封装在以下过程中。训练可能需要一些时间。</c>
+<l>train_dl_model (DLDataset, DLModelHandle, TrainParam, 0, TrainResults, TrainInfos, EvaluationInfos)</l>
+<l>dev_disp_text ('Press Run (F5) to continue', 'window', 'bottom', 'right', 'black', [], [])</l>
+<l>stop ()</l>
+<c>* </c>
+<l>dev_close_window ()</l>
+<c>* </c>
+<c>* </c>
+<c>* ***   3.) 评估   ***</c>
+<c>* </c>
+<c>* 计算分类和分割阈值，并评估训练模型的性能。</c>
+<c>* </c>
+<c>* 设置用于计算异常分数的因子。有关详细信息，请参阅get_dl_model_param（）的文档。</c>
+<c>* 此参数可以提高“ok”和“nok”图像之间的分类。</c>
+<c>* 例如，对于小缺陷，可能适合较大的值。</c>
+<l>StandardDeviationFactor := 1.0</l>
+<l>set_dl_model_param (DLModelHandle, 'standard_deviation_factor', StandardDeviationFactor)</l>
+<c>* </c>
+<c>* 估计阈值值。它们用于确定像素或图像是否被视为异常。</c>
+<c>* compute_dl_anomaly_thresholds过程基于使用的数据集返回可能的建议。根据应用程序的不同，手动调整这些阈值可能会有益。</c>
+<c>* 有两种不同的标准来估计AnomalySegmentationThreshold。有关详细信息，请参阅compute_dl_anomaly_thresholds的文档。</c>
+<l>GenParamThresholds := dict{enable_display: true}</l>
+<l>compute_dl_anomaly_thresholds (DLModelHandle, DLDataset, GenParamThresholds, AnomalySegmentationThreshold, AnomalyClassificationThresholds)</l>
+<l>dev_disp_text ('Press Run (F5) to continue', 'window', 'bottom', 'right', 'black', [], [])</l>
+<l>stop ()</l>
+<c>* </c>
+<l>dev_close_window ()</l>
+<c>* </c>
+<c>* 设置通用评估参数并在测试拆分上评估模型。</c>
+<l>GenParamEvaluation := dict{measures: 'all'}</l>
+<l>GenParamEvaluation.anomaly_classification_thresholds := AnomalyClassificationThresholds</l>
+<l>evaluate_dl_model (DLDataset, DLModelHandle, 'split', 'test', GenParamEvaluation, EvaluationResult, EvalParams)</l>
+<c>* </c>
+<c>* 可视化测试图像的图像级异常分数直方图以及用于评估的分类阈值。</c>
+<l>GenParamDisplay := dict{display_mode: ['score_histogram', 'score_legend']}</l>
+<l>WindowDict := dict{}</l>
+<l>dev_display_anomaly_detection_evaluation (EvaluationResult, EvalParams, GenParamDisplay, WindowDict)</l>
+<l>dev_disp_text ('Press Run (F5) to continue', 'window', 'bottom', 'right', 'black', 'box', 'true')</l>
+<l>stop ()</l>
+<c>* </c>
+<l>dev_close_window_dict (WindowDict)</l>
+<c>* </c>
+<c>* 可视化几个评估结果，如精度、召回率和混淆矩阵</c>
+<c>* 对于给定的分类阈值。</c>
+<l>GenParamDisplay.display_mode := ['pie_charts_precision', 'pie_charts_recall', 'absolute_confusion_matrix']</l>
+<c>* 通过其在AnomalyClassificationThresholds中的索引选择一个阈值的评估结果以显示。</c>
+<c>* 我们使用计算的AnomalyClassificationThresholds的最后一个。请注意，您应该检查哪个AnomalyClassificationThreshold最适合您的应用。</c>
+<l>ClassificationThresholdIndex := |AnomalyClassificationThresholds| - 1</l>
+<l>GenParamDisplay.classification_threshold_index := ClassificationThresholdIndex</l>
+<l>WindowDict := dict{}</l>
+<l>dev_display_anomaly_detection_evaluation (EvaluationResult, EvalParams, GenParamDisplay, WindowDict)</l>
+<l>dev_disp_text ('Press Run (F5) to continue', 'window', 'bottom', 'right', 'black', [], [])</l>
+<l>stop ()</l>
+<c>* </c>
+<l>dev_close_window_dict (WindowDict)</l>
+<c>* </c>
+<c>* 选择推断的阈值并将其与模型一起存储。</c>
+<l>get_dl_model_param (DLModelHandle, 'meta_data', MetaData)</l>
+<l>MetaData.anomaly_segmentation_threshold := AnomalySegmentationThreshold$'1.16e'</l>
+<l>MetaData.anomaly_classification_threshold := AnomalyClassificationThresholds[ClassificationThresholdIndex]$'1.16e'</l>
+<l>set_dl_model_param (DLModelHandle, 'meta_data', MetaData)</l>
+<c>* </c>
+<c>* 存储训练好的模型。</c>
+<l>write_dl_model (DLModelHandle, 'model_final.hdl')</l>
+<c>* </c>
+<c>* </c>
+<c>* ***   4.) 推断   ***</c>
+<c>* </c>
+<c>* 为了演示推断步骤，我们将训练好的模型应用于一些随机选择的示例图像。</c>
+<l>list_image_files (ImageDir + '/' + ImageSubDirs, 'default', 'recursive', ImageFiles)</l>
+<l>tuple_shuffle (ImageFiles, ImageFilesShuffled)</l>
+<c>* </c>
+<c>* 获取推断阈值。这些已与上面的模型一起存储在元数据中。</c>
+<l>get_dl_model_param (DLModelHandle, 'meta_data', MetaData)</l>
+<l>InferenceClassificationThreshold := number(MetaData.anomaly_classification_threshold)</l>
+<l>InferenceSegmentationThreshold := number(MetaData.anomaly_segmentation_threshold)</l>
+<c>* </c>
+<c>* 创建包含用于显示的数据集参数的字典。</c>
+<l>DLDatasetInfo := dict{class_names: ['ok', 'nok'], class_ids: [0, 1]}</l>
+<c>* </c>
+<l>WindowDict := dict{}</l>
+<l>for IndexInference := 0 to min2(|ImageFilesShuffled|,10) - 1 by 1</l>
+<l>    read_image (Image, ImageFilesShuffled[IndexInference])</l>
+<l>    gen_dl_samples_from_images (Image, DLSample)</l>
+<l>    preprocess_dl_samples (DLSample, DLPreprocessParam)</l>
+<c>    * </c>
+<c>    * 使用与训练相同的特定于数据集的预处理。</c>
+<l>    if (ExampleSpecificPreprocessing)</l>
+<l>        preprocess_dl_samples_bottle (DLSample)</l>
+<l>    endif</l>
+<c>    * </c>
+<l>    apply_dl_model (DLModelHandle, DLSample, [], DLResult)</l>
+<c>    * </c>
+<c>    * 应用阈值对区域和整个图像进行分类。</c>
+<l>    threshold_dl_anomaly_results (InferenceSegmentationThreshold, InferenceClassificationThreshold, DLResult)</l>
+<c>    * </c>
+<c>    * 显示推断结果。</c>
+<l>    dev_display_dl_data (DLSample, DLResult, DLDatasetInfo, ['anomaly_result', 'anomaly_image'], [], WindowDict)</l>
+<l>    dev_disp_text ('Press F5 (continue)', 'window', 'bottom', 'center', 'black', [], [])</l>
+<l>    stop ()</l>
+<l>endfor</l>
+<c>* </c>
+<l>dev_close_window_dict (WindowDict)</l>
+<c></c>
+</body>
+<docu id="main">
+<parameters/>
+</docu>
+</procedure>
+<procedure name="preprocess_dl_samples_bottle">
+<interface>
+<ic>
+<par name="DLSamples" base_type="ctrl" dimension="0"/>
+</ic>
+</interface>
+<body>
+<c>* </c>
+<c>* This procedure performs a segmentation using a threshold to</c>
+<c>* remove the white background. This improves the performance</c>
+<c>* of the anomaly detection model.</c>
+<c>* </c>
+<c>* Loop over all samples in the dataset.</c>
+<l>for SampleIndex := 0 to |DLSamples| - 1 by 1</l>
+<c>    * DLSample is a handle(dict), so we get a shallow copy here.</c>
+<c>    * By changing it we are changing DLSamples.</c>
+<l>    DLSample := DLSamples[SampleIndex]</l>
+<c>    * </c>
+<c>    * Since anomalies are only located on the bottles we exclude</c>
+<c>    * the white areas surrounding the bottles.</c>
+<l>    rgb1_to_gray (DLSample.image, GrayImage)</l>
+<l>    threshold (GrayImage, CenterRegion, 'min', 1.5)</l>
+<l>    fill_up (CenterRegion, CenterRegionFillUp)</l>
+<l>    reduce_domain (DLSample.image, CenterRegionFillUp, DLSample.image)</l>
+<l>endfor</l>
+<c>* </c>
+<l>return ()</l>
+</body>
+<docu id="preprocess_dl_samples_bottle">
+<parameters>
+<parameter id="DLSamples"/>
+</parameters>
+</docu>
+</procedure>
+<procedure name="get_image_dir">
+<interface>
+<oc>
+<par name="ImageDir" base_type="ctrl" dimension="0"/>
+</oc>
+</interface>
+<body>
+<l>get_system ('image_dir', ImageDir)</l>
+<l>get_system ('operating_system', OperatingSystem)</l>
+<l>IsWindows := OperatingSystem{0:2} == 'Win'</l>
+<l>if (IsWindows)</l>
+<l>    Separator := ';'</l>
+<l>else</l>
+<l>    Separator := ':'</l>
+<l>endif</l>
+<l>tuple_split (ImageDir, Separator, ImageDir)</l>
+<l>ImageDir := ImageDir[0]</l>
+<l>ImageDir := regexp_replace(ImageDir,['\\\\+', 'replace_all'],'/')</l>
+<l>return ()</l>
+</body>
+<docu id="get_image_dir">
+<parameters>
+<parameter id="ImageDir"/>
+</parameters>
+</docu>
+</procedure>
+</hdevelop>
