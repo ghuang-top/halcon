@@ -22,6 +22,7 @@ mkdocs new .
 
 ## 3、Configuration
 
+```sh
 ??? note
     - `site_name`：网站的名称是 "MkDocs YouTube Tutorial"。
     - `site_url`：网站的 URL 是 https://james-willett.github.io/mkdocs-material-youtube-tutorial/。
@@ -43,6 +44,7 @@ mkdocs new .
         - content.tabs.link           #启用了内容区域的选项卡链接功能，允许在文档中创建多个选项卡，并在导航栏或其他位置添加链接以切换选项卡。
         - content.code.annotation     #启用了对代码块进行注释的功能，允许在代码块中添加注释或说明。
         - content.code.copy           #启用了复制代码块的功能，允许用户点击按钮或链接来复制代码块的内容到剪贴板。
+```
 
 ```yaml
 site_name: Markdown book
